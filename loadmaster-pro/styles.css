@@ -386,3 +386,82 @@ footer .disc { display: block; margin-top: 6px; }
   .rp-disc { font-size: 10.5px; color: #7a849c; line-height: 1.5; margin-top: 18px; border-top: 1px solid #e2e7f0; padding-top: 12px; }
   .rp-foot { font-size: 10.5px; color: #9aa3ba; text-align: center; margin-top: 10px; }
 }
+
+/* ---------- Pro: permit & code pack ---------- */
+.permit-panel {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
+}
+.permit-panel.hidden { display: none; }
+
+.pp-head { display: flex; align-items: center; gap: 11px; margin-bottom: 12px; }
+.pp-badge {
+  font-size: 11px; font-weight: 800; letter-spacing: .06em;
+  padding: 3px 8px; border-radius: 7px; color: #06122b;
+  background: var(--grad-cta);
+}
+.pp-htext { display: flex; flex-direction: column; line-height: 1.25; }
+.pp-htext b { font-size: 15px; }
+.pp-htext span { font-size: 12.5px; color: var(--muted); }
+
+.pp-lock, .pp-idle, .pp-error, .pp-loading { text-align: center; padding: 10px 6px 4px; }
+.pp-lock p, .pp-idle p { color: var(--muted); font-size: 13.5px; line-height: 1.5; margin: 6px 4px 14px; }
+.pp-lock-ico { font-size: 26px; }
+.pp-idle p b { color: var(--text); }
+
+.pp-btn {
+  appearance: none; border: 1px solid var(--border); cursor: pointer;
+  background: var(--card-strong); color: var(--text);
+  font-size: 14px; font-weight: 650; font-family: inherit;
+  padding: 11px 16px; border-radius: var(--radius-sm); width: 100%;
+}
+.pp-btn.primary { border: none; color: #06122b; background: var(--grad-cta); }
+.pp-btn + .pp-btn { margin-top: 8px; }
+.pp-fine { font-size: 11.5px; color: var(--muted-2); margin-top: 9px; }
+
+.pp-loading { display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--muted); font-size: 13.5px; padding: 22px 6px; }
+.pp-loading small { color: var(--muted-2); font-size: 12px; }
+.pp-spin {
+  width: 22px; height: 22px; border-radius: 50%;
+  border: 2.5px solid rgba(255,255,255,0.15); border-top-color: var(--accent);
+  animation: pp-rot 0.8s linear infinite;
+}
+@keyframes pp-rot { to { transform: rotate(360deg); } }
+
+.pp-status { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.pp-pill { font-size: 12.5px; font-weight: 700; padding: 5px 11px; border-radius: 999px; background: var(--card-strong); border: 1px solid var(--border); }
+.pp-pill.high { border-color: rgba(40,200,120,.5); }
+.pp-pill.low { border-color: rgba(255,170,60,.5); }
+.pp-conf { font-size: 11.5px; color: var(--muted-2); }
+
+.pp-reqs { display: flex; flex-direction: column; gap: 1px; border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--border-soft); }
+.pp-req { display: grid; grid-template-columns: 42% 1fr; gap: 10px; padding: 11px 12px; background: rgba(255,255,255,0.018); }
+.pp-req-k { font-size: 12.5px; color: var(--muted); align-self: start; }
+.pp-req-v { font-size: 13.5px; line-height: 1.45; }
+.pp-req-v b { color: var(--text); }
+.pp-note { color: var(--muted); font-size: 12px; }
+.pp-unk { color: var(--muted-2); font-size: 12.5px; font-style: italic; }
+.pp-src { color: var(--accent); font-size: 11.5px; text-decoration: none; white-space: nowrap; }
+
+.pp-other { margin-top: 12px; }
+.pp-other h4, .pp-dept h4 { margin: 0 0 7px; font-size: 13px; color: var(--text); }
+.pp-other-row { font-size: 13px; color: var(--muted); line-height: 1.5; margin-bottom: 5px; }
+.pp-other-row b { color: var(--text); }
+
+.pp-dept { margin-top: 14px; padding: 12px; border-radius: var(--radius-sm); background: var(--card-strong); border: 1px solid var(--border-soft); }
+.pp-dept-addr { font-size: 12.5px; color: var(--muted); margin-bottom: 8px; }
+.pp-contacts { display: flex; flex-wrap: wrap; gap: 8px; }
+.pp-contact { font-size: 12.5px; color: var(--text); text-decoration: none; padding: 7px 10px; border-radius: 9px; background: rgba(255,255,255,0.04); border: 1px solid var(--border-soft); }
+
+.pp-notes { margin: 12px 2px 0; text-align: left; }
+.pp-sources { margin-top: 12px; font-size: 12.5px; }
+.pp-sources summary { cursor: pointer; color: var(--muted); }
+.pp-sources ul { margin: 8px 0 0; padding-left: 18px; }
+.pp-sources a { color: var(--accent); text-decoration: none; word-break: break-all; }
+
+.pp-actions { margin-top: 14px; }
+.pp-disc { font-size: 11.5px; color: var(--muted-2); line-height: 1.5; margin: 12px 2px 0; text-align: left; }

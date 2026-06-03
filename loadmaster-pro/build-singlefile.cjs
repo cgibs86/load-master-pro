@@ -19,6 +19,9 @@ html = html.replace(/<link rel="stylesheet" href="styles\.css" \/>/, "<style>\n"
 html = html.replace(/<link rel="manifest"[^>]*>\s*/, "");
 html = html.replace(/<link rel="icon"[^>]*>\s*/, '<link rel="icon" href="' + iconData + '" />\n  ');
 html = html.replace(/<link rel="apple-touch-icon"[^>]*>/, '<link rel="apple-touch-icon" href="' + iconData + '" />');
+// The Pro permit search needs the server endpoint, which the single-file
+// offline preview can't reach — drop its script so the preview stays standalone.
+html = html.replace(/\s*<script src="permits\.js"><\/script>/, "");
 // Replace the three external scripts with one inline bundle.
 html = html.replace(/\s*<script src="climate-data\.js"><\/script>\s*<script src="loadcalc\.js"><\/script>\s*<script src="app\.js"><\/script>/,
   "\n  <script>\n" + js + "\n  </script>");

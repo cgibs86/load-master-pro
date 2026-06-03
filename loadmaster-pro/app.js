@@ -35,7 +35,10 @@
           lat: parseFloat(m.lat),
           lon: parseFloat(m.lon),
           label: m.display_name,
-          postcode: a.postcode || null
+          postcode: a.postcode || null,
+          city: a.city || a.town || a.village || a.hamlet || a.municipality || null,
+          county: a.county || null,
+          state: a.state || null
         };
       });
   }
@@ -45,7 +48,15 @@
     return fetch(url, { headers: { "Accept": "application/json" } })
       .then(function (r) { return r.json(); })
       .then(function (m) {
-        return { lat: lat, lon: lon, label: (m && m.display_name) || (lat.toFixed(4) + ", " + lon.toFixed(4)), postcode: (m && m.address && m.address.postcode) || null };
+        var a = (m && m.address) || {};
+        return {
+          lat: lat, lon: lon,
+          label: (m && m.display_name) || (lat.toFixed(4) + ", " + lon.toFixed(4)),
+          postcode: a.postcode || null,
+          city: a.city || a.town || a.village || a.hamlet || a.municipality || null,
+          county: a.county || null,
+          state: a.state || null
+        };
       });
   }
 
@@ -203,6 +214,19 @@
     $("#shareBtn").addEventListener("click", shareResult);
 
     saveActiveToHistory();
+
+    // Pro permit & code search panel (optional add-on; see permits.js).
+    if (window.LMPPermits && window.LMPPermits.mount) {
+      window.LMPPermits.mount({
+        geo: state.geo,
+        climate: state.climate,
+        effective: state.effective,
+        result: state.result,
+        address: ($("#address").value || "").trim() || shortAddr(state.geo.label),
+        settings: loadSettings()
+      });
+    }
+
     el.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
@@ -497,6 +521,7 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { t.classList.remove("show"); }, 2200);
   }
+  window.LMPToast = toast; // shared with the Pro permit add-on
 
   // ---------- UI helpers ----------
   function setLoading(on) {

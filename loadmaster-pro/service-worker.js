@@ -1,10 +1,11 @@
 /* LoadMaster Pro — offline service worker */
-var CACHE = "loadmaster-v1";
+var CACHE = "loadmaster-v2";
 var ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
+  "./permits.js",
   "./loadcalc.js",
   "./climate-data.js",
   "./manifest.webmanifest",
