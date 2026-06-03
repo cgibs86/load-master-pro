@@ -19,20 +19,25 @@ build step and no runtime dependencies** — see
 [`loadmaster-pro/README.md`](./loadmaster-pro/README.md) for full feature,
 hosting, and model documentation.
 
-### Quick local test
+### Run it (one command)
+
+Requires Node 18+ (no `npm install` needed — there are no dependencies):
 
 ```bash
-cd loadmaster-pro
-python3 -m http.server 8099
-# open http://localhost:8099
+npm start
+# → open http://localhost:8099
 ```
 
-### Optional helper scripts (Node, zero-dependency)
+`npm start` launches a tiny zero-dependency static server (`serve.cjs`). To use a
+different port: `PORT=3000 npm start`.
+
+> Prefer Python? `cd loadmaster-pro && python3 -m http.server 8099` works too.
+
+### Helper scripts (Node, zero-dependency)
 
 ```bash
-cd loadmaster-pro
-node build-singlefile.cjs     # bundle into a single self-contained HTML preview
-node icons/generate-icons.cjs # regenerate the app icon PNGs
+npm run build   # bundle into a single self-contained HTML preview
+npm run icons   # regenerate the app icon PNGs
 ```
 
 ## Deploy
