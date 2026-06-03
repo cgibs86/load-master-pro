@@ -1,0 +1,19 @@
+# Dependencies
+node_modules
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor / OS
+.DS_Store
+*.sw?
+.vscode/*
+!.vscode/extensions.json
+.idea
+
+# LoadMaster Pro generated single-file preview build
+LoadMaster-Pro-preview.html
