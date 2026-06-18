@@ -1,0 +1,12 @@
+node_modules/
+.env
+*.log
+npm-debug.log*
+
+# Local working copy of the mock sheet (created at runtime in dry-run)
+data/*.local.json
+
+# Service-account key files should never be committed
+*service-account*.json
+credentials*.json
+google-credentials.json

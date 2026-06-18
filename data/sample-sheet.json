@@ -1,0 +1,6 @@
+[
+  { "phone": "+15551230001", "status": "", "result": "" },
+  { "phone": "+15551230002", "status": "", "result": "" },
+  { "phone": "+15551230003", "status": "completed", "result": "Already processed earlier." },
+  { "phone": "+15551230004", "status": "", "result": "" }
+]
