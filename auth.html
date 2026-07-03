@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#070b18" />
+  <title>Sign in — LoadMaster Pro</title>
+  <link rel="icon" type="image/svg+xml" href="icons/icon.svg" />
+  <link rel="stylesheet" href="landing.css" />
+</head>
+<body class="auth-body">
+
+  <nav class="nav">
+    <div class="wrap nav-inner">
+      <a class="brand" href="index.html">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v9.6" stroke="#06122b" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="16.5" r="3.4" fill="#06122b"/><path d="M7 8a5 5 0 0 1 10 0" stroke="#06122b" stroke-width="2.2" stroke-linecap="round"/></svg>
+        </span>
+        <span><b>LoadMaster&nbsp;Pro</b><small>HVAC LOAD INTELLIGENCE</small></span>
+      </a>
+      <div class="nav-links">
+        <a href="index.html#pricing" class="hide-m">Pricing</a>
+        <a href="app.html" class="ghost">Open app</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="auth-main">
+    <div class="auth-card">
+      <a class="brand" href="index.html" aria-label="LoadMaster Pro home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v9.6" stroke="#06122b" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="16.5" r="3.4" fill="#06122b"/><path d="M7 8a5 5 0 0 1 10 0" stroke="#06122b" stroke-width="2.2" stroke-linecap="round"/></svg>
+        </span>
+      </a>
+
+      <div class="auth-tabs">
+        <button id="tabLogin" type="button">Log in</button>
+        <button id="tabSignup" type="button">Sign up</button>
+      </div>
+
+      <form id="authForm" novalidate>
+        <div id="rowName" style="display:none">
+          <label for="fName">Your name</label>
+          <input id="fName" type="text" autocomplete="name" placeholder="Alex Rivera" />
+          <label for="fCompany">Company (optional)</label>
+          <input id="fCompany" type="text" autocomplete="organization" placeholder="Summit Heating &amp; Air" />
+        </div>
+        <label for="fEmail">Email</label>
+        <input id="fEmail" type="email" autocomplete="email" placeholder="you@company.com" />
+        <label for="fPass">Password</label>
+        <input id="fPass" type="password" autocomplete="current-password" placeholder="••••••••" />
+        <div class="auth-err" id="authErr"></div>
+        <button class="btn btn-primary" id="authSubmit" type="submit">Log in</button>
+      </form>
+
+      <p class="auth-alt" id="authAlt">New to LoadMaster? <a href="#signup" id="altLink">Start your free trial</a></p>
+      <p class="auth-alt"><a href="app.html">Continue as guest →</a></p>
+      <p class="auth-note">Your account is stored securely on this device. Team sync and billing activate when your company's workspace goes live.</p>
+    </div>
+  </main>
+
+  <script>
+  (function () {
+    "use strict";
+    var USERS_KEY = "lmp_users_v1", SESSION_KEY = "lmp_user";
+    var mode = location.hash === "#signup" ? "signup" : "login";
+    // Arriving from a Stripe Payment Link success redirect (?plan=pro#signup)
+    // signs the new account up on that tier instead of the trial.
+    var paidPlan = (function () {
+      try {
+        var p = new URLSearchParams(location.search).get("plan");
+        return ["solo", "pro", "fleet"].indexOf(p) !== -1 ? p : null;
+      } catch (e) { return null; }
+    })();
+    if (paidPlan) mode = "signup";
+    var $ = function (s) { return document.querySelector(s); };
+
+    function loadUsers() { try { return JSON.parse(localStorage.getItem(USERS_KEY)) || {}; } catch (e) { return {}; } }
+    function saveUsers(u) { localStorage.setItem(USERS_KEY, JSON.stringify(u)); }
+
+    // Salted SHA-256 so passwords are never stored in the clear on-device.
+    function hash(pw, email) {
+      var data = new TextEncoder().encode("lmp!" + email + "!" + pw);
+      return crypto.subtle.digest("SHA-256", data).then(function (buf) {
+        return Array.from(new Uint8Array(buf)).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
+      });
+    }
+
+    function setMode(m) {
+      mode = m;
+      $("#tabLogin").classList.toggle("on", m === "login");
+      $("#tabSignup").classList.toggle("on", m === "signup");
+      $("#rowName").style.display = m === "signup" ? "block" : "none";
+      $("#authSubmit").textContent = m === "signup" ? "Create account — start free trial" : "Log in";
+      $("#authAlt").innerHTML = m === "signup"
+        ? 'Already have an account? <a href="#" id="altLink">Log in</a>'
+        : 'New to LoadMaster? <a href="#signup" id="altLink">Start your free trial</a>';
+      $("#altLink").addEventListener("click", function (e) { e.preventDefault(); setMode(m === "signup" ? "login" : "signup"); });
+      $("#fPass").setAttribute("autocomplete", m === "signup" ? "new-password" : "current-password");
+      err("");
+    }
+    function err(msg) {
+      var el = $("#authErr");
+      el.textContent = msg;
+      el.classList.toggle("show", !!msg);
+    }
+
+    $("#tabLogin").addEventListener("click", function () { setMode("login"); });
+    $("#tabSignup").addEventListener("click", function () { setMode("signup"); });
+    setMode(mode);
+
+    $("#authForm").addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      var email = $("#fEmail").value.trim().toLowerCase();
+      var pw = $("#fPass").value;
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { err("Please enter a valid email address."); return; }
+      if (pw.length < 6) { err("Password must be at least 6 characters."); return; }
+      var users = loadUsers();
+
+      if (mode === "signup") {
+        var name = $("#fName").value.trim();
+        if (!name) { err("Please enter your name."); return; }
+        if (users[email]) { err("An account with that email already exists on this device — try logging in."); return; }
+        hash(pw, email).then(function (h) {
+          users[email] = { name: name, company: $("#fCompany").value.trim(), pw: h, plan: paidPlan || "trial", created: Date.now() };
+          saveUsers(users);
+          localStorage.setItem(SESSION_KEY, JSON.stringify({ email: email, name: name, company: users[email].company, plan: paidPlan || "trial" }));
+          // Seed the report branding from the signup company name.
+          try {
+            var s = JSON.parse(localStorage.getItem("lmp_settings_v1")) || {};
+            if (!s.company && users[email].company) { s.company = users[email].company; localStorage.setItem("lmp_settings_v1", JSON.stringify(s)); }
+          } catch (e) {}
+          location.href = "app.html";
+        });
+      } else {
+        var u = users[email];
+        if (!u) { err("No account found for that email on this device. Sign up to create one."); return; }
+        hash(pw, email).then(function (h) {
+          if (h !== u.pw) { err("Incorrect password."); return; }
+          localStorage.setItem(SESSION_KEY, JSON.stringify({ email: email, name: u.name, company: u.company, plan: u.plan || "trial" }));
+          location.href = "app.html";
+        });
+      }
+    });
+  })();
+  </script>
+</body>
+</html>
