@@ -1,5 +1,5 @@
 /* LoadMaster Pro — offline service worker */
-var CACHE = "loadmaster-v4";
+var CACHE = "loadmaster-v5";
 var ASSETS = [
   "./",
   "./index.html",
@@ -9,6 +9,7 @@ var ASSETS = [
   "./styles.css",
   "./app.js",
   "./loadcalc.js",
+  "./photo-ai.js",
   "./climate-data.js",
   "./permits-data.js",
   "./climate-engine.js",
@@ -36,8 +37,8 @@ self.addEventListener("fetch", function (e) {
   if (req.method !== "GET") return;
   var url = new URL(req.url);
 
-  // Network-first for live API calls (geocoding / climate / property); never cache those.
-  if (url.hostname.indexOf("nominatim") !== -1 || url.hostname.indexOf("rentcast") !== -1 || url.hostname.indexOf("open-meteo") !== -1) {
+  // Network-first for live API calls (geocoding / climate / property / AI); never cache those.
+  if (url.hostname.indexOf("nominatim") !== -1 || url.hostname.indexOf("rentcast") !== -1 || url.hostname.indexOf("open-meteo") !== -1 || url.hostname.indexOf("anthropic") !== -1) {
     e.respondWith(fetch(req).catch(function () { return new Response("{}", { headers: { "Content-Type": "application/json" } }); }));
     return;
   }

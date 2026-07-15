@@ -12,6 +12,8 @@
     property: null,   // { area, bedrooms, yearBuilt, source }
     overrides: {},    // user manual overrides
     photos: [],       // site photos for the report/permit package (this session)
+    photoAI: null,    // AI photo analysis: { summary, findings, applied, before, after }
+    photoBusy: false, // analysis request in flight
     result: null
   };
 
@@ -165,6 +167,8 @@
   function finishRun(prop) {
     state.overrides = {};
     state.photos = [];
+    state.photoAI = null;
+    state.photoBusy = false;
     if (prop && !prop.error && prop.area) {
       state.property = prop;
     } else {
@@ -179,22 +183,29 @@
     render();
   }
 
+  // Input precedence: user manual override > AI photo finding (high/medium
+  // confidence only, filtered in applyPhotoInsights) > property data > default.
   function compute() {
     var p = state.property, c = state.climate, o = state.overrides;
-    var area = o.area != null ? o.area : p.area;
+    var pa = (state.photoAI && state.photoAI.applied) || {};
+    var area = o.area != null ? o.area : (pa.area != null ? pa.area : p.area);
     var bedrooms = o.bedrooms != null ? o.bedrooms : (p.bedrooms != null ? p.bedrooms : 3);
-    var quality = o.quality || window.LoadCalc.qualityFromYear(p.yearBuilt) || "average";
-    var foundation = o.foundation || "slab";
-    var sun = o.sun || "average";
+    var quality = o.quality || pa.quality || window.LoadCalc.qualityFromYear(p.yearBuilt) || "average";
+    var foundation = o.foundation || pa.foundation || "slab";
+    var sun = o.sun || pa.sun || "average";
     var systemType = o.systemType || "single";
-    var ceiling = o.ceiling != null ? o.ceiling : 9;
+    var ceiling = o.ceiling != null ? o.ceiling : (pa.ceiling != null ? pa.ceiling : 9);
     var rangePct = p.source === "fetched" ? 0.10 : 0.15;
+    // Photo evidence tightens the confidence band a notch on estimated homes.
+    if (p.source !== "fetched" && Object.keys(pa).length) rangePct = 0.12;
     state.effective = { area: area, bedrooms: bedrooms, quality: quality, foundation: foundation, sun: sun, systemType: systemType, ceiling: ceiling, rangePct: rangePct };
-    state.result = window.LoadCalc.compute({
+    var opts = {
       area: area, bedrooms: bedrooms, quality: quality, foundation: foundation, sun: sun, systemType: systemType, ceiling: ceiling,
       heating99: c.heating99, cooling1: c.cooling1, outGrains: c.outGrains,
       elevFt: c.elevFt || 0, rangePct: rangePct
-    });
+    };
+    if (pa.windowFrac != null) opts.windowFrac = pa.windowFrac;
+    state.result = window.LoadCalc.compute(opts);
   }
 
   // Subscription tier: 0 guest · 1 solo · 2 trial/pro · 3 fleet.
@@ -253,6 +264,7 @@
 
       hpCard(r, c) +
       photosCard() +
+      photoInsightsCard() +
       permitCard() +
 
       '<div class="actions">' +
@@ -295,36 +307,44 @@
   function equipRow(k, v) { return '<div class="eq-row"><span>' + k + '</span><b>' + v + '</b></div>'; }
   function systemTypeLabel(t) { return { single: "single-stage A/C or HP", two: "two-stage A/C or HP", variable: "variable-capacity system" }[t] || "system"; }
 
-  // ---------- Site photos (Pro feature: attach to report / permit package) ----------
+  // ---------- Site photos (Pro feature: attach to report / permit package,
+  // and optionally feed the AI photo analysis) ----------
   function photosCard() {
     if (planTier() < 2) return ""; // upsell handled by the PermitIQ card below
     var thumbs = state.photos.map(function (p, i) {
       return '<div class="photo-th"><img src="' + p.src + '" alt="site photo ' + (i + 1) + '"/><button class="photo-x" data-x="' + i + '" aria-label="Remove">×</button></div>';
     }).join("");
+    var aiBlock = "";
+    if (state.photos.length) {
+      aiBlock = state.photoBusy
+        ? '<button class="action-btn primary ai-btn" disabled><span class="spin"></span>Reading photos…</button>'
+        : '<button class="action-btn primary ai-btn" id="aiAnalyzeBtn">' + sparkIcon() + (state.photoAI ? 'Re-analyze photos with AI' : 'Analyze photos with AI') + '</button>' +
+          '<p class="ai-note">Optional. AI reads sun exposure, windows, insulation and size from your shots and tunes the load numbers. Uses your Anthropic API key (Settings).</p>';
+    }
     return '' +
       '<div class="photos-card">' +
         '<div class="hp-head"><span class="ico">' + cameraIcon() + '</span>Site photos<span class="ph-count">' + state.photos.length + '/6</span></div>' +
-        '<p class="hp-text">Shoot the outdoor-unit location, electrical panel, and existing equipment. Photos attach to the report and the permit package.</p>' +
+        '<p class="hp-text">Snap the home\'s outside (each side you can reach — shows sun, shade, windows, siding) and inside (main rooms, ceilings, attic or crawl space if accessible). Photos attach to the report and permit package — and AI can read them to make the load numbers more accurate. Totally optional: skip photos and the estimate still works.</p>' +
         '<div class="photo-grid">' + thumbs +
           (state.photos.length < 6 ? '<label class="photo-add" for="photoIn">+<span>Add</span></label>' : '') +
         '</div>' +
         '<input type="file" id="photoIn" accept="image/*" capture="environment" multiple hidden />' +
+        aiBlock +
       '</div>';
   }
   function wirePhotos() {
     var inp = $("#photoIn");
-    if (!inp) return;
-    inp.addEventListener("change", function (ev) {
+    if (inp) inp.addEventListener("change", function (ev) {
       var files = Array.prototype.slice.call(ev.target.files || []).slice(0, 6 - state.photos.length);
       if (!files.length) return;
       var pending = files.length;
       files.forEach(function (f) {
         var reader = new FileReader();
         reader.onload = function () {
-          downscaleImage(reader.result, 900, function (dataUrl) {
+          downscaleImage(reader.result, 1100, function (dataUrl) {
             state.photos.push({ src: dataUrl });
             if (--pending === 0) render();
-          });
+          }, "image/jpeg");
         };
         reader.onerror = function () { if (--pending === 0) render(); };
         reader.readAsDataURL(f);
@@ -336,7 +356,144 @@
         render();
       });
     });
+    var ai = $("#aiAnalyzeBtn");
+    if (ai) ai.addEventListener("click", runPhotoAnalysis);
+    var clearAi = $("#aiClearBtn");
+    if (clearAi) clearAi.addEventListener("click", function () {
+      state.photoAI = null;
+      compute();
+      render();
+      toast("Photo adjustments removed");
+    });
   }
+
+  // ---------- AI photo analysis (PhotoScan) ----------
+  var PHOTO_FIELD_LABELS = {
+    sun: "Sun exposure",
+    quality: "Construction / insulation",
+    foundation: "Foundation",
+    ceiling: "Ceiling height",
+    windowFrac: "Window amount",
+    area: "Conditioned area",
+    stories: "Stories",
+    other: "Observation"
+  };
+  function photoFindingValue(f) {
+    if (f.value == null) return "";
+    switch (f.field) {
+      case "sun": return { low: "Shaded", average: "Average", high: "Sunny" }[f.value] || String(f.value);
+      case "quality": return { good: "Well insulated", average: "Average", poor: "Older / leaky" }[f.value] || String(f.value);
+      case "foundation": return { slab: "Slab", crawl: "Crawl space", basement: "Basement" }[f.value] || String(f.value);
+      case "ceiling": return f.value + " ft";
+      case "windowFrac": return Math.round(f.value * 100) + "% of floor area";
+      case "area": return fmt(f.value) + " ft²";
+      case "stories": return f.value + (f.value === 1 ? " story" : " stories");
+      default: return String(f.value);
+    }
+  }
+
+  function runPhotoAnalysis() {
+    var s = loadSettings();
+    if (!s.anthropicApiKey) {
+      toast("Add your Anthropic API key in Settings to enable photo analysis");
+      openSettings();
+      return;
+    }
+    if (!state.photos.length || state.photoBusy) return;
+    state.photoBusy = true;
+    render();
+    var e = state.effective, p = state.property, c = state.climate, g = state.geo;
+    var ctx = {
+      address: shortAddr(g.label),
+      climateCity: c.city,
+      area: e.area,
+      areaSource: p.source,
+      quality: e.quality,
+      sun: e.sun,
+      foundation: e.foundation,
+      ceiling: e.ceiling,
+      bedrooms: e.bedrooms,
+      yearBuilt: p.yearBuilt
+    };
+    window.PhotoAI.analyze(state.photos.map(function (ph) { return ph.src; }), ctx, s.anthropicApiKey)
+      .then(applyPhotoInsights)
+      .catch(function (err) {
+        state.photoBusy = false;
+        render();
+        toast("Photo analysis failed: " + (err.message || "unknown error"));
+      });
+  }
+
+  // Fold the AI findings into the calculation. Only high/medium-confidence
+  // findings are applied; user overrides always win; a photo-guessed square
+  // footage never replaces real property-record data.
+  function applyPhotoInsights(res) {
+    var before = {
+      heating: state.result.heating.total,
+      cooling: state.result.cooling.total,
+      tons: state.result.recommendedTons
+    };
+    var applied = {};
+    var o = state.overrides, p = state.property;
+    res.findings.forEach(function (f) {
+      f.status = "info";
+      if (f.field === "other" || f.field === "stories") return; // informational only
+      if (f.confidence === "low" || f.value == null) { f.status = "low"; return; }
+      var overridden = (f.field === "area" || f.field === "ceiling") ? o[f.field] != null : !!o[f.field];
+      if (overridden) { f.status = "kept"; return; }               // user's manual setting wins
+      if (f.field === "area" && p.source === "fetched") { f.status = "kept"; f.keptWhy = "property records"; return; }
+      applied[f.field] = f.value;
+      f.status = "applied";
+    });
+    state.photoAI = { summary: res.summary, findings: res.findings, applied: applied, before: before };
+    state.photoBusy = false;
+    compute();
+    state.photoAI.after = {
+      heating: state.result.heating.total,
+      cooling: state.result.cooling.total,
+      tons: state.result.recommendedTons
+    };
+    render();
+    var n = Object.keys(applied).length;
+    toast(n ? "Photos analyzed — " + n + " adjustment" + (n > 1 ? "s" : "") + " applied" : "Photos analyzed — inputs already match what the photos show");
+  }
+
+  function photoInsightsCard() {
+    var pa = state.photoAI;
+    if (!pa) return "";
+    var rows = pa.findings.map(function (f) {
+      var badge = {
+        applied: '<span class="ai-badge on">applied</span>',
+        kept: '<span class="ai-badge kept">kept ' + (f.keptWhy || "your setting") + '</span>',
+        low: '<span class="ai-badge low">low confidence — not applied</span>',
+        info: '<span class="ai-badge">noted</span>'
+      }[f.status];
+      var val = photoFindingValue(f);
+      return '<div class="ai-row">' +
+          '<div class="ai-row-top"><span>' + (PHOTO_FIELD_LABELS[f.field] || f.field) + (val ? ':&nbsp;<b>' + escapeHtml(val) + '</b>' : '') + '</span>' + badge + '</div>' +
+          (f.note ? '<div class="ai-row-note">' + escapeHtml(f.note) + '</div>' : '') +
+        '</div>';
+    }).join("");
+    var delta = "";
+    if (pa.after) {
+      var dc = pa.after.cooling - pa.before.cooling;
+      var dh = pa.after.heating - pa.before.heating;
+      delta = (dc === 0 && dh === 0)
+        ? '<div class="ai-delta">Load totals unchanged — the photos confirmed the existing assumptions.</div>'
+        : '<div class="ai-delta">Adjusted result: cooling <b>' + (dc > 0 ? "+" : "") + fmt(dc) + '</b> BTU/h, heating <b>' + (dh > 0 ? "+" : "") + fmt(dh) + '</b> BTU/h' +
+          (pa.after.tons !== pa.before.tons ? ' · A/C size ' + pa.before.tons + 't → <b>' + pa.after.tons + 't</b>' : '') + '</div>';
+    }
+    return '' +
+      '<div class="ai-card">' +
+        '<div class="hp-head"><span class="ico ai">' + sparkIcon() + '</span>What the photos told us<span class="ai-model">AI · vision</span></div>' +
+        '<p class="hp-text">' + escapeHtml(pa.summary) + '</p>' +
+        '<div class="ai-rows">' + rows + '</div>' +
+        delta +
+        '<button class="ai-clear" id="aiClearBtn">Remove photo adjustments</button>' +
+        '<p class="pq-disc">AI reads visible evidence only and can misjudge — findings marked “applied” changed the inputs above; your manual fine-tune settings always take priority. Verify on site.</p>' +
+      '</div>';
+  }
+  function sparkIcon() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l1.9 5.4L19 10l-5.1 1.6L12 17l-1.9-5.4L5 10l5.1-1.6z"/><path d="M19 15l.9 2.4L22 18l-2.1.6L19 21l-.9-2.4L16 18l2.1-.6z"/></svg>'; }
   function cameraIcon() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>'; }
   function shieldIcon() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>'; }
   function lockIcon() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>'; }
@@ -629,6 +786,9 @@
     activeHistoryId = j.id;
     state.geo = j.snap.geo; state.climate = j.snap.climate;
     state.property = j.snap.property; state.overrides = j.snap.overrides || {};
+    // Photos and AI photo adjustments are session-only and belong to one
+    // property — never carry them into a reopened job.
+    state.photos = []; state.photoAI = null; state.photoBusy = false;
     $("#address").value = j.address;
     clearError();
     compute();
@@ -714,6 +874,7 @@
           rrow("Sensible / latent split", fmt(r.cooling.sensible) + " / " + fmt(r.cooling.latent) + " BTU/h") +
         '</table></div>' +
         reportPhotos() +
+        reportPhotoInsights() +
         (opts.permit ? reportPermitSection() : "") +
         '<p class="rp-disc"><b>Disclaimer:</b> this report is an ACCA Manual&nbsp;J–style block-load <b>estimate</b> generated by LoadMaster Pro for ' +
           'sizing guidance and permit preparation. It is not a substitute for a full room-by-room Manual&nbsp;J with Manual&nbsp;S equipment ' +
@@ -725,6 +886,32 @@
 
     $("#reportRoot").innerHTML = html;
     setTimeout(function () { window.print(); }, 80);
+  }
+
+  // AI photo-analysis appendix: what the photos showed and which inputs
+  // were adjusted as a result.
+  function reportPhotoInsights() {
+    var pa = state.photoAI;
+    if (!pa) return "";
+    var rows = pa.findings.map(function (f) {
+      var status = { applied: "Applied to calculation", kept: "Not applied — " + (f.keptWhy ? "kept " + f.keptWhy : "manual setting kept"), low: "Observed (low confidence — not applied)", info: "Noted" }[f.status] || "Noted";
+      var val = photoFindingValue(f);
+      return rrow(escapeHtml(PHOTO_FIELD_LABELS[f.field] || f.field) + (val ? ": " + escapeHtml(val) : ""),
+                  escapeHtml(f.note || "") + ' <i>(' + status + ')</i>');
+    }).join("");
+    var delta = "";
+    if (pa.after && (pa.after.cooling !== pa.before.cooling || pa.after.heating !== pa.before.heating)) {
+      var dc = pa.after.cooling - pa.before.cooling, dh = pa.after.heating - pa.before.heating;
+      delta = '<p class="rp-permit-note">Applying the photo evidence adjusted the calculated loads by ' +
+        (dc > 0 ? "+" : "") + fmt(dc) + ' BTU/h cooling and ' + (dh > 0 ? "+" : "") + fmt(dh) + ' BTU/h heating' +
+        (pa.after.tons !== pa.before.tons ? ', changing the recommended A/C size from ' + pa.before.tons + ' to ' + pa.after.tons + ' tons' : '') +
+        '. The load figures on page 1 already include these adjustments.</p>';
+    }
+    return '<div class="rp-block"><h2>AI photo analysis</h2>' +
+      '<p class="rp-permit-sub">' + escapeHtml(pa.summary) + '</p>' +
+      '<table>' + rows + '</table>' + delta +
+      '<p class="rp-permit-note">Findings were extracted from the site photos by AI vision analysis and verified against the inputs above; low-confidence observations are listed for reference but did not change the calculation.</p>' +
+    '</div>';
   }
 
   // Site photos grid for the printed report.
@@ -882,6 +1069,7 @@
   function openSettings() {
     var s = loadSettings();
     var hasKey = !!s.propertyApiKey;
+    var hasAiKey = !!s.anthropicApiKey;
     pendingLogo = null;
     $("#settingsRoot").innerHTML =
       '<div class="overlay" id="overlay"><div class="sheet">' +
@@ -909,6 +1097,13 @@
         '<input type="password" id="apiKey" placeholder="' + (hasKey ? "•••••• saved" : "paste key (optional)") + '" />' +
         '<div class="status">' + (hasKey ? "✓ A key is saved on this device." : "No key set — using smart estimates.") +
           ' Browser calls to property APIs can be blocked by CORS; if a lookup fails, the app falls back to an editable estimate.</div>' +
+        '</div>' +
+
+        '<div class="set-group"><div class="set-title">AI photo analysis</div>' +
+        '<p class="sub">Add an <a class="link" href="https://platform.claude.com/" target="_blank" rel="noopener">Anthropic API</a> key and the app can read your site photos — sun exposure, windows, insulation, ceiling height, home size — and tune the load calculation automatically. Photos are sent to Anthropic only when you tap “Analyze”.</p>' +
+        '<label>Anthropic API key</label>' +
+        '<input type="password" id="aiKey" placeholder="' + (hasAiKey ? "•••••• saved" : "sk-ant-… (optional)") + '" />' +
+        '<div class="status">' + (hasAiKey ? "✓ A key is saved on this device — it never leaves it except to call the API directly." : "No key set — photo analysis stays off; everything else works normally.") + '</div>' +
         '</div>' +
 
         '<button class="save" id="saveSettings">Save settings</button>' +
@@ -942,6 +1137,8 @@
       cur.email = $("#setEmail").value.trim();
       var v = $("#apiKey").value.trim();
       if (v) cur.propertyApiKey = v; // empty keeps existing key
+      var ak = $("#aiKey").value.trim();
+      if (ak) cur.anthropicApiKey = ak; // empty keeps existing key
       if (pendingLogo === "REMOVE") delete cur.logo;
       else if (pendingLogo) cur.logo = pendingLogo;
       saveSettings(cur);
@@ -951,8 +1148,9 @@
     function close() { $("#settingsRoot").innerHTML = ""; }
   }
 
-  // Downscale an uploaded logo to keep localStorage small.
-  function downscaleImage(dataUrl, maxDim, cb) {
+  // Downscale an uploaded image. PNG (default) for logos with transparency;
+  // site photos use JPEG so uploads to the vision API stay small.
+  function downscaleImage(dataUrl, maxDim, cb, mime) {
     try {
       var img = new Image();
       img.onload = function () {
@@ -960,7 +1158,7 @@
         var w = Math.round(img.width * scale), h = Math.round(img.height * scale);
         var cv = document.createElement("canvas"); cv.width = w; cv.height = h;
         cv.getContext("2d").drawImage(img, 0, 0, w, h);
-        cb(cv.toDataURL("image/png"));
+        cb(mime === "image/jpeg" ? cv.toDataURL("image/jpeg", 0.85) : cv.toDataURL("image/png"));
       };
       img.onerror = function () { cb(dataUrl); };
       img.src = dataUrl;

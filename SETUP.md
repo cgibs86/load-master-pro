@@ -61,7 +61,30 @@ When you want server-enforced subscriptions, team seats, and cross-device sync:
    `checkout.session.completed` / `customer.subscription.deleted`. Stripe + Supabase both have
    step-by-step guides for exactly this pairing.
 
-## 4. Optional polish
+## 4. AI photo analysis (optional)
+
+The app can read a job's site photos with AI vision — sun exposure and shading, window
+amount and type, insulation/construction quality, foundation, ceiling height, and home
+size — and fold what it sees into the load calculation. After the analysis, a "What the
+photos told us" card (and a matching section in the PDF report) lists every finding, its
+confidence, and whether it changed the numbers. Photos are always optional; without them
+(or without a key) the calculator behaves exactly as before.
+
+1. Get an API key at [platform.claude.com](https://platform.claude.com/) (Anthropic).
+2. In the app: **Settings → AI photo analysis** → paste the key. It's stored on-device
+   only, like the RentCast key.
+3. On any result with photos attached, tap **Analyze photos with AI**.
+
+Notes:
+- Analysis uses the Claude vision model (`claude-opus-4-8`); a 6-photo analysis costs a
+  few cents. Photos are sent to Anthropic only when the user taps Analyze.
+- Only high/medium-confidence findings are applied. A user's manual fine-tune settings
+  always win, and a photo-based size guess never overrides real property-record data.
+- **Honest limitation:** as with the RentCast key, a key pasted into a browser app lives
+  on that device. For a team product, proxy the call through a tiny serverless function
+  holding your key (same upgrade path as step 3).
+
+## 5. Optional polish
 
 - **Custom domain** (e.g. `loadmasterpro.com`): buy the domain, add it in Settings → Pages,
   set the DNS CNAME. Update the Stripe redirect URLs to match.
