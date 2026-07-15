@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6d7bff"/>
+      <stop offset="1" stop-color="#19c6e8"/>
+    </linearGradient>
+    <radialGradient id="hi" cx="0.28" cy="0.22" r="0.8">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <rect width="512" height="512" rx="112" fill="url(#hi)"/>
+  <g stroke="#f6fbff" stroke-width="30" stroke-linecap="round" fill="none">
+    <path d="M256 150 a52 52 0 1 1 0 0" opacity="0"/>
+  </g>
+  <!-- thermometer -->
+  <rect x="232" y="120" width="48" height="250" rx="24" fill="#f6fbff"/>
+  <circle cx="256" cy="378" r="58" fill="#f6fbff"/>
+  <rect x="244" y="210" width="24" height="168" rx="12" fill="#ff5b5b"/>
+  <circle cx="256" cy="378" r="40" fill="#ff5b5b"/>
+  <g fill="#f6fbff" opacity="0.95">
+    <rect x="292" y="150" width="40" height="12" rx="6"/>
+    <rect x="292" y="192" width="28" height="12" rx="6"/>
+    <rect x="292" y="234" width="40" height="12" rx="6"/>
+    <rect x="292" y="276" width="28" height="12" rx="6"/>
+  </g>
+</svg>

@@ -1,0 +1,19 @@
+{
+  "name": "load-master-pro",
+  "version": "1.0.0",
+  "private": true,
+  "description": "LoadMaster Pro — address-based residential HVAC load calculator PWA",
+  "scripts": {
+    "start": "node serve.cjs",
+    "dev": "node serve.cjs",
+    "build": "node loadmaster-pro/build-singlefile.cjs",
+    "icons": "node loadmaster-pro/icons/generate-icons.cjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.70.0"
+  }
+}
