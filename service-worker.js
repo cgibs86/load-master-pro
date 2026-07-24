@@ -1,5 +1,5 @@
 /* LoadMaster Pro — offline service worker */
-var CACHE = "loadmaster-v6";
+var CACHE = "loadmaster-v7";
 var ASSETS = [
   "./",
   "./index.html",

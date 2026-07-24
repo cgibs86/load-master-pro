@@ -288,3 +288,37 @@ section { padding: 68px 0 0; }
 .auth-err { display: none; margin-top: 14px; padding: 11px 13px; border-radius: 12px; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); color: #ffc9c9; font-size: 13px; }
 .auth-err.show { display: block; }
 .auth-note { margin-top: 20px; font-size: 11.5px; color: var(--muted-2); text-align: center; line-height: 1.6; }
+
+/* ---------- Hero feature chips ---------- */
+.hero-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: -6px 0 28px; }
+@media (max-width: 880px) { .hero-chips { justify-content: center; } }
+.chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12.5px; font-weight: 600; color: var(--muted);
+  background: var(--card); border: 1px solid var(--border);
+  padding: 8px 13px; border-radius: 999px; white-space: nowrap;
+}
+.chip b { color: var(--text); font-weight: 700; }
+
+/* ---------- "It is AI" band ---------- */
+.ai-band {
+  margin-top: 76px; border-radius: 28px; padding: clamp(32px, 5vw, 56px);
+  background: linear-gradient(150deg, rgba(109, 123, 255, 0.16), rgba(24, 200, 216, 0.10)), var(--card-strong);
+  border: 1px solid rgba(110, 168, 255, 0.3); position: relative; overflow: hidden;
+}
+.ai-band::before { content: ""; position: absolute; top: -120px; left: 50%; transform: translateX(-50%); width: 520px; height: 280px; background: radial-gradient(closest-side, rgba(58, 215, 230, 0.25), transparent); filter: blur(44px); pointer-events: none; }
+.ai-band .sec-head { position: relative; }
+.ai-grid { position: relative; display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 34px; }
+@media (max-width: 980px) { .ai-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .ai-grid { grid-template-columns: 1fr; } }
+.ai-cell {
+  border-radius: 16px; padding: 18px 17px; background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border-soft);
+}
+.ai-cell b { display: block; font-size: 15px; margin-bottom: 7px; letter-spacing: -0.01em; }
+.ai-cell span { font-size: 13px; color: var(--muted); line-height: 1.6; }
+
+/* ---------- 4-step how-it-works ---------- */
+.steps-4 { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 1020px) { .steps-4 { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 640px) { .steps-4 { grid-template-columns: 1fr; } }

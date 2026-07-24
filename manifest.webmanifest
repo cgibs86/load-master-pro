@@ -1,7 +1,7 @@
 {
-  "name": "LoadMaster Pro — HVAC Load Calculator",
+  "name": "LoadMaster AI — HVAC Load Calculator",
   "short_name": "LoadMaster",
-  "description": "Estimate residential HVAC heating and cooling loads from just an address.",
+  "description": "The HVAC industry's own AI — load calcs from an address, refined by site photos, with per-city permit intelligence.",
   "start_url": "./app.html",
   "scope": "./",
   "display": "standalone",
