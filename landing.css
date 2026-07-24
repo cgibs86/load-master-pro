@@ -172,6 +172,19 @@ section { padding: 68px 0 0; }
   background: linear-gradient(120deg, #ffc157, #ff8a3d); color: #33210a;
   padding: 4px 10px; border-radius: 999px; white-space: nowrap;
 }
+.new-pill {
+  display: inline-block; vertical-align: 4px; margin-left: 8px;
+  font-size: 10.5px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase;
+  background: var(--grad-cta); color: #06122b;
+  padding: 4px 10px; border-radius: 999px; white-space: nowrap;
+  box-shadow: 0 8px 18px -8px rgba(25, 198, 232, 0.7);
+}
+.ps-ai {
+  margin-top: 10px; padding: 8px 11px; border-radius: 12px;
+  font-size: 9.5px; font-weight: 700; color: #d9fbff;
+  background: linear-gradient(120deg, rgba(109, 123, 255, 0.22), rgba(25, 198, 232, 0.14));
+  border: 1px solid rgba(58, 215, 230, 0.35);
+}
 .feat p { color: var(--muted); font-size: 15px; line-height: 1.7; margin: 0 0 16px; }
 .feat ul { list-style: none; padding: 0; margin: 0; }
 .feat li { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; color: var(--muted); padding: 7px 0; }
