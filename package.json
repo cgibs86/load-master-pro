@@ -5,9 +5,7 @@
   "description": "LoadMaster Pro — address-based residential HVAC load calculator PWA",
   "scripts": {
     "start": "node serve.cjs",
-    "dev": "node serve.cjs",
-    "build": "node loadmaster-pro/build-singlefile.cjs",
-    "icons": "node loadmaster-pro/icons/generate-icons.cjs"
+    "dev": "node serve.cjs"
   },
   "engines": {
     "node": ">=18"

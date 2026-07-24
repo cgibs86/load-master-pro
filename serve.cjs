@@ -1,5 +1,5 @@
 /* LoadMaster Pro — zero-dependency static dev server.
- * Serves the loadmaster-pro/ app folder so you can run the PWA locally with
+ * Serves the repo root (the app) so you can run the PWA locally with
  * a single command (`npm start`). No external packages required.
  *
  *   PORT=8099 node serve.cjs        (PORT defaults to 8099)
@@ -8,7 +8,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 
-const ROOT = path.join(__dirname, "loadmaster-pro");
+const ROOT = __dirname;
 const PORT = process.env.PORT || 8099;
 
 // Pro permit-search endpoint (server-side; keeps the API key off the client).

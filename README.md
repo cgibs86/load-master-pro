@@ -13,11 +13,9 @@ transparent breakdown. Works offline once installed.
 
 ## The app
 
-The calculator lives in [`loadmaster-pro/`](./loadmaster-pro/). It's plain static
-files (HTML/CSS/vanilla JS + a service worker and web manifest) with **no build
-step and no runtime dependencies** — see
-[`loadmaster-pro/README.md`](./loadmaster-pro/README.md) for full feature,
-hosting, and model documentation.
+The app lives at the repo root (`index.html` landing page, `app.html`
+calculator). It's plain static files (HTML/CSS/vanilla JS + a service worker
+and web manifest) with **no build step and no runtime dependencies**.
 
 ### Run it (one command)
 
@@ -31,7 +29,7 @@ npm start
 `npm start` launches a tiny static server (`serve.cjs`). To use a different port:
 `PORT=3000 npm start`.
 
-> Prefer Python? `cd loadmaster-pro && python3 -m http.server 8099` works too —
+> Prefer Python? `python3 -m http.server 8099` from the repo root works too —
 > but the Pro permit search (below) needs the Node server.
 
 ## Pro: permit & code search
@@ -66,18 +64,12 @@ panel reports that the feature isn't configured.
 > (AHJ) before submitting. The "Enable Pro" toggle is a local placeholder for
 > testing; real billing/auth is a later step.
 
-### Helper scripts (Node, zero-dependency)
-
-```bash
-npm run build   # bundle the calculator into a single self-contained HTML preview
-npm run icons   # regenerate the app icon PNGs
-```
-
 ## Deploy
 
-The **calculator** is a static site — host the `loadmaster-pro/` folder on any
-HTTPS static host (GitHub Pages, Netlify, Vercel, Cloudflare Pages) and **Add to
-Home Screen** on your phone. HTTPS is required for PWA install and geolocation.
+The app is a static site — the repo root deploys to GitHub Pages automatically
+on every push to `main` (`.github/workflows/pages.yml`), or host it on any
+HTTPS static host (Netlify, Vercel, Cloudflare Pages) and **Add to Home
+Screen** on your phone. HTTPS is required for PWA install and geolocation.
 
 The **Pro permit search** needs a server. Run the Node server (`npm start`) on a
 host that holds `ANTHROPIC_API_KEY`, or deploy `api/permit-search.cjs` as a
