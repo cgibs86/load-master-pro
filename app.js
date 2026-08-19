@@ -4,6 +4,9 @@
 
   var SETTINGS_KEY = "lmp_settings_v1";
   var $ = function (sel) { return document.querySelector(sel); };
+  // Ops telemetry (metrics.js) — never throws, no-ops when unavailable.
+  function mx(name, props) { try { if (window.MX) window.MX.event(name, props || {}); } catch (e) {} }
+  var calcStart = { ts: 0, via: "address" };
 
   // Current working state for the active calculation.
   var state = {
@@ -110,6 +113,8 @@
   // ---------- Orchestration ----------
   function run(address) {
     activeHistoryId = null;
+    calcStart = { ts: Date.now(), via: "address" };
+    mx("calc_start", { via: "address" });
     setLoading(true, "Locating address…");
     clearError();
     hideSuggest();
@@ -122,12 +127,15 @@
       .then(function (prop) { finishRun(prop); })
       .catch(function (err) {
         setLoading(false);
+        mx("calc_fail", { via: calcStart.via, msg: String(err && err.message || "unknown").slice(0, 120) });
         showError(err.message || "Something went wrong. Please try again.");
       });
   }
 
   function runFromCoords(geo) {
     activeHistoryId = null;
+    calcStart = { ts: Date.now(), via: "geo" };
+    mx("calc_start", { via: "geo" });
     setLoading(true, "Analyzing 8,760 hrs of climate…");
     clearError();
     state.geo = geo;
@@ -181,6 +189,21 @@
     compute();
     setLoading(false);
     render();
+    try {
+      mx("calc_success", {
+        via: calcStart.via,
+        ms: Date.now() - calcStart.ts,
+        climate: state.climate.source,
+        hours: state.climate.hours || 0,
+        prop: state.property.source,
+        tons: state.result.recommendedTons,
+        heating: Math.round(state.result.heating.total),
+        cooling: Math.round(state.result.cooling.total),
+        area: state.effective.area,
+        city: (state.geo && state.geo.city ? String(state.geo.city) : "").slice(0, 60),
+        state: (state.geo && state.geo.state ? String(state.geo.state) : "").slice(0, 20)
+      });
+    } catch (e) {}
   }
 
   // Input precedence: user manual override > AI photo finding (high/medium
@@ -401,6 +424,7 @@
     }
     if (!state.photos.length || state.photoBusy) return;
     state.photoBusy = true;
+    mx("photo_ai_start", { photos: state.photos.length });
     render();
     var e = state.effective, p = state.property, c = state.climate, g = state.geo;
     var ctx = {
@@ -419,6 +443,7 @@
       .then(applyPhotoInsights)
       .catch(function (err) {
         state.photoBusy = false;
+        mx("photo_ai_fail", { msg: String(err && err.message || "unknown").slice(0, 120) });
         render();
         toast("Photo analysis failed: " + (err.message || "unknown error"));
       });
@@ -447,6 +472,7 @@
     });
     state.photoAI = { summary: res.summary, findings: res.findings, applied: applied, before: before };
     state.photoBusy = false;
+    mx("photo_ai_result", { findings: res.findings.length, applied: Object.keys(applied).length });
     compute();
     state.photoAI.after = {
       heating: state.result.heating.total,
@@ -550,6 +576,7 @@
     if (mail) mail.addEventListener("click", emailPermitDept);
   }
   function emailPermitDept() {
+    mx("permit_email", { city: state.geo && state.geo.city ? String(state.geo.city).slice(0, 60) : null });
     var g = state.geo, r = state.result, e = state.effective;
     var s = loadSettings();
     var subject = "Residential mechanical permit application — " + shortAddr(g.label);
@@ -699,6 +726,7 @@
       state.overrides.ceiling = isFinite(ceiling) ? ceiling : undefined;
       // Keep displaying as a user-adjusted estimate.
       state.property.source = "estimate";
+      mx("manual_adjust", { fields: ["area", "bedrooms", "quality", "foundation", "sun", "systemType", "ceiling"].filter(function (f) { return state.overrides[f] !== undefined; }).join(",") });
       compute();
       render();
     });
@@ -805,8 +833,10 @@
       "• Conditioned area: " + fmt(e.area) + " ft²\n" +
       "Prepared with BTU.ai";
     if (navigator.share) {
+      mx("share_result", { how: "native" });
       navigator.share({ title: "HVAC Load Estimate", text: text }).catch(function () {});
     } else if (navigator.clipboard && navigator.clipboard.writeText) {
+      mx("share_result", { how: "clipboard" });
       navigator.clipboard.writeText(text).then(function () { toast("Summary copied to clipboard"); });
     } else { toast("Sharing isn't supported on this device"); }
   }
@@ -885,6 +915,7 @@
       '</div>';
 
     $("#reportRoot").innerHTML = html;
+    mx("report_generated", { permit: !!opts.permit, tons: state.result.recommendedTons });
     setTimeout(function () { window.print(); }, 80);
   }
 
@@ -1142,6 +1173,10 @@
       if (pendingLogo === "REMOVE") delete cur.logo;
       else if (pendingLogo) cur.logo = pendingLogo;
       saveSettings(cur);
+      mx("settings_saved", {
+        company: !!cur.company, phone: !!cur.phone, license: !!cur.license,
+        logo: !!cur.logo, propertyKey: !!cur.propertyApiKey, aiKey: !!cur.anthropicApiKey
+      });
       toast("Settings saved");
       close();
     });

@@ -5,7 +5,8 @@
   "description": "BTU.ai — the HVAC industry's own AI: address-based Manual J–style load calculator PWA",
   "scripts": {
     "start": "node serve.cjs",
-    "dev": "node serve.cjs"
+    "dev": "node serve.cjs",
+    "test:dashboard": "node tests/dashboard-smoke.cjs"
   },
   "engines": {
     "node": ">=18"

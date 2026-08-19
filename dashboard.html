@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#070b18" />
+  <meta name="robots" content="noindex" />
+  <title>Ops — BTU.ai Control Board</title>
+  <link rel="icon" type="image/svg+xml" href="icons/icon.svg" />
+  <link rel="stylesheet" href="dashboard.css" />
+  <script src="config.js"></script>
+</head>
+<body>
+
+  <!-- ============ TOP BAR ============ -->
+  <header class="topbar">
+    <div class="tb-left">
+      <div class="tb-brand">
+        <span class="tb-logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v9.6" stroke="#06122b" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="16.5" r="3.4" fill="#06122b"/><path d="M7 8a5 5 0 0 1 10 0" stroke="#06122b" stroke-width="2.2" stroke-linecap="round" fill="none"/></svg>
+        </span>
+        <div><b>BTU.ai <span class="ops-tag">OPS</span></b><small id="subTitle">Mission control — all systems</small></div>
+      </div>
+      <div class="live-pill" id="serverPill"><span class="dot"></span><span id="serverPillText">connecting…</span></div>
+      <div class="tb-chips" id="topChips">
+        <span class="chip" id="chipClock">--:--:--</span>
+        <span class="chip" id="chipUptime" title="Server process uptime">up —</span>
+        <span class="chip" id="chipActive" title="Visitors active in the last 5 minutes">● -- active</span>
+        <span class="chip" id="chipRpm" title="Requests in the last 60 seconds">-- req/min</span>
+        <span class="chip demo hidden" id="chipDemo">DEMO DATA</span>
+      </div>
+    </div>
+    <div class="tb-right">
+      <div class="range-group" id="rangeGroup" role="tablist" aria-label="Time range">
+        <button data-range="900000">15m</button>
+        <button data-range="3600000">1h</button>
+        <button data-range="21600000" class="on">6h</button>
+        <button data-range="86400000">24h</button>
+        <button data-range="604800000">7d</button>
+        <button data-range="0">All</button>
+      </div>
+      <button class="tb-btn" id="autoBtn" title="Auto-refresh every 5 seconds">
+        <span class="auto-dot"></span><span id="autoBtnText">Live</span>
+      </button>
+      <button class="tb-btn" id="seedBtn" title="Load 48h of clearly-marked sample data to explore the dashboard">Demo data</button>
+      <button class="tb-btn" id="exportBtn" title="Download the raw metrics log (JSONL)">Export</button>
+      <button class="tb-btn danger" id="resetBtn" title="Erase all collected metrics">Reset</button>
+    </div>
+  </header>
+
+  <!-- ============ TAB RAIL ============ -->
+  <nav class="rail" id="rail">
+    <button data-tab="overview" class="on">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+      <span>Overview</span>
+    </button>
+    <button data-tab="traffic">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 17V9M13 17V5M8 17v-3"/></svg>
+      <span>Traffic</span>
+    </button>
+    <button data-tab="frontend">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>
+      <span>Frontend</span>
+    </button>
+    <button data-tab="product">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9"/><path d="M21 3l-9 9"/><path d="M15 3h6v6"/></svg>
+      <span>Product</span>
+    </button>
+    <button data-tab="backend">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="6" rx="2"/><rect x="2" y="15" width="20" height="6" rx="2"/><path d="M6 6h.01M6 18h.01"/></svg>
+      <span>Backend</span>
+    </button>
+    <button data-tab="live">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h13"/><circle cx="19" cy="12" r="2"/></svg>
+      <span>Live feed</span>
+    </button>
+  </nav>
+
+  <!-- ============ CONTENT ============ -->
+  <main id="content">
+    <div class="offline-banner hidden" id="offlineBanner">
+      Server unreachable — the dashboard needs the Node server (<code>npm start</code>). Retrying…
+    </div>
+
+    <!-- OVERVIEW -->
+    <section class="tab-panel" id="tab-overview">
+      <div class="kpis" id="kpiRow"></div>
+      <div class="grid-2">
+        <div class="card wide">
+          <div class="card-head"><h3>Traffic</h3>
+            <div class="legend" id="trafficLegend"></div>
+          </div>
+          <div class="chart-host" id="trafficChart"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>Conversion funnel</h3><span class="muted" id="funnelRange"></span></div>
+          <div id="funnelViz"></div>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><h3>System health</h3><span class="muted" id="sysSub"></span></div>
+          <div id="systemHealth"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>Alerts &amp; checks</h3><span class="muted" id="alertSub"></span></div>
+          <div id="alertsPanel" class="alerts"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TRAFFIC -->
+    <section class="tab-panel hidden" id="tab-traffic">
+      <div class="kpis" id="trafficKpis"></div>
+      <div class="card">
+        <div class="card-head"><h3>Audience over time</h3>
+          <div class="legend" id="audLegend"></div>
+        </div>
+        <div class="chart-host" id="audChart"></div>
+      </div>
+      <div class="grid-3">
+        <div class="card"><div class="card-head"><h3>Top pages</h3></div><div id="topPages"></div></div>
+        <div class="card"><div class="card-head"><h3>Referrers</h3></div><div id="topRefs"></div></div>
+        <div class="card"><div class="card-head"><h3>Devices</h3></div><div class="split" id="devicesWrap"></div></div>
+      </div>
+      <div class="grid-3">
+        <div class="card"><div class="card-head"><h3>Browsers</h3></div><div id="topBrowsers"></div></div>
+        <div class="card"><div class="card-head"><h3>Operating systems</h3></div><div id="topOs"></div></div>
+        <div class="card"><div class="card-head"><h3>Network quality</h3></div><div id="topNet"></div></div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><h3>Activity by hour of day</h3><span class="muted">page views, local time</span></div>
+          <div id="hourHeat" class="heat"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>Sessions</h3></div>
+          <div id="sessionsBox" class="kv-grid"></div>
+        </div>
+      </div>
+      <div class="grid-3">
+        <div class="card"><div class="card-head"><h3>New vs returning</h3></div><div class="split" id="retWrap"></div></div>
+        <div class="card"><div class="card-head"><h3>Screen sizes</h3></div><div id="topScreens"></div></div>
+        <div class="card"><div class="card-head"><h3>Languages</h3></div><div id="topLangs"></div></div>
+      </div>
+    </section>
+
+    <!-- FRONTEND -->
+    <section class="tab-panel hidden" id="tab-frontend">
+      <div class="card">
+        <div class="card-head"><h3>Core Web Vitals</h3><span class="muted">Google thresholds · p50 / p75 / p90</span></div>
+        <div id="vitalsGrid" class="vitals"></div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><h3>Page load time distribution</h3><span class="muted" id="loadDistSub"></span></div>
+          <div class="chart-host" id="loadHist"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>Page weight &amp; assets</h3><span class="muted">transferred at load</span></div>
+          <div id="pageWeight" class="kv-grid"></div>
+          <div class="mini-table" id="perPageVitals"></div>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><h3>Vitals by device</h3></div>
+          <div class="mini-table" id="vitalsDevice"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>Vitals by network</h3></div>
+          <div class="mini-table" id="vitalsNet"></div>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><h3>JavaScript errors</h3><span class="muted" id="errSub"></span></div>
+          <div class="mini-table" id="jsErrors"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>Offline &amp; PWA</h3></div>
+          <div id="pwaBox" class="kv-grid"></div>
+          <div id="pwaBars" class="mt8"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PRODUCT -->
+    <section class="tab-panel hidden" id="tab-product">
+      <div class="kpis" id="productKpis"></div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><h3>Job funnel</h3><span class="muted">landing → calc → close-ready</span></div>
+          <div id="jobFunnel"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>Calculation performance</h3><span class="muted" id="calcPerfSub"></span></div>
+          <div class="chart-host" id="calcDurHist"></div>
+        </div>
+      </div>
+      <div class="grid-3">
+        <div class="card"><div class="card-head"><h3>TrueClimate adoption</h3><span class="muted">live weather vs station table</span></div><div class="split" id="climateSplit"></div></div>
+        <div class="card"><div class="card-head"><h3>Property data source</h3><span class="muted">RentCast fetched vs estimated</span></div><div class="split" id="propSplit"></div></div>
+        <div class="card"><div class="card-head"><h3>A/C tonnage sized</h3></div><div class="chart-host short" id="tonsHist"></div></div>
+      </div>
+      <div class="grid-2">
+        <div class="card"><div class="card-head"><h3>Where the jobs are</h3><span class="muted">from calculated addresses</span></div>
+          <div class="grid-2-nest">
+            <div id="topCities"></div>
+            <div id="topStates"></div>
+          </div>
+        </div>
+        <div class="card"><div class="card-head"><h3>PhotoScan AI</h3><span class="muted">photo analysis usage &amp; impact</span></div>
+          <div id="photoBox" class="kv-grid"></div>
+          <div id="photoBars" class="mt8"></div>
+        </div>
+      </div>
+      <div class="grid-3">
+        <div class="card"><div class="card-head"><h3>Signups by plan</h3></div><div id="signupBars"></div></div>
+        <div class="card"><div class="card-head"><h3>CTA clicks</h3><span class="muted">where prospects click</span></div><div id="ctaBars"></div></div>
+        <div class="card"><div class="card-head"><h3>Manual fine-tuning</h3><span class="muted">which inputs users adjust</span></div><div id="adjustBars"></div></div>
+      </div>
+    </section>
+
+    <!-- BACKEND -->
+    <section class="tab-panel hidden" id="tab-backend">
+      <div class="kpis" id="backendKpis"></div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><h3>Throughput</h3><span class="muted">requests / min</span></div>
+          <div class="chart-host" id="tpChart"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>Response status</h3></div>
+          <div class="split" id="statusWrap"></div>
+          <div class="mini-table mt8" id="statusList"></div>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><h3>Latency by route</h3><span class="muted">p50 / p95 / max, ms</span></div>
+          <div class="mini-table" id="routeLatency"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>PermitIQ — Claude research API</h3><span class="muted" id="permitSub"></span></div>
+          <div id="permitKpis" class="kv-grid"></div>
+          <div class="chart-host short" id="permitHist"></div>
+          <div class="mini-table mt8" id="permitRecent"></div>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><h3>Server resources</h3><span class="muted">live from process</span></div>
+          <div class="chart-host short" id="resChart"></div>
+          <div id="resKpis" class="kv-grid"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>Slowest requests</h3><span class="muted" id="slowSub"></span></div>
+          <div class="mini-table" id="slowTable"></div>
+          <div class="card-head mt16"><h3>Not found (404)</h3></div>
+          <div class="mini-table" id="nfTable"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- LIVE -->
+    <section class="tab-panel hidden" id="tab-live">
+      <div class="live-controls">
+        <button class="tb-btn" id="pauseBtn"><span id="pauseIcon">⏸</span> <span id="pauseText">Pause stream</span></button>
+        <input type="search" id="liveFilter" placeholder="Filter requests (path, status, method)…" />
+        <div class="chips" id="statusChips">
+          <button class="chip-btn on" data-s="">all</button>
+          <button class="chip-btn" data-s="2">2xx</button>
+          <button class="chip-btn" data-s="3">3xx</button>
+          <button class="chip-btn" data-s="4">4xx</button>
+          <button class="chip-btn" data-s="5">5xx</button>
+        </div>
+      </div>
+      <div class="grid-2 live-grid">
+        <div class="card live-card">
+          <div class="card-head"><h3>Request stream</h3><span class="muted" id="reqCount"></span></div>
+          <div class="live-scroll" id="reqStream"></div>
+        </div>
+        <div class="card live-card">
+          <div class="card-head"><h3>Product events</h3><span class="muted">calcs · errors · permits · signups</span></div>
+          <div class="live-scroll" id="eventStream"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- EMPTY STATE -->
+    <section class="tab-panel hidden" id="tab-empty">
+      <div class="card empty-card">
+        <h2>No metrics yet 🛰️</h2>
+        <p>The collector is live — metrics start flowing the moment the app is used (open <a href="app.html" target="_blank">the app</a> in another tab and run a calculation).</p>
+        <p>Want to see the full control board right now? Load 48 hours of clearly-marked demo data:</p>
+        <button class="tb-btn big" id="seedBtn2">⚡ Load demo data</button>
+        <p class="small-muted">Demo events are flagged <code>demo</code> and can be wiped anytime with Reset.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="dash-foot">
+    BTU.ai Ops · self-hosted metrics, zero dependencies · metrics never contain addresses, emails, API keys or IPs · data lives in <code>data/metrics.jsonl</code>
+    · <span id="footStat"></span>
+  </footer>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>

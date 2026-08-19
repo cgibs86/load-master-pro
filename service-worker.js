@@ -1,5 +1,5 @@
 /* BTU.ai — offline service worker */
-var CACHE = "btuai-v8";
+var CACHE = "btuai-v9";
 var ASSETS = [
   "./",
   "./index.html",
@@ -7,6 +7,7 @@ var ASSETS = [
   "./auth.html",
   "./landing.css",
   "./styles.css",
+  "./metrics.js",
   "./app.js",
   "./loadcalc.js",
   "./photo-ai.js",
@@ -36,6 +37,10 @@ self.addEventListener("fetch", function (e) {
   var req = e.request;
   if (req.method !== "GET") return;
   var url = new URL(req.url);
+
+  // Never intercept same-origin API routes (permit search, metrics) or the
+  // ops dashboard — they are live data/views and must always hit the network.
+  if (url.origin === location.origin && (url.pathname.indexOf("/api/") === 0 || url.pathname.indexOf("/dashboard") === 0)) return;
 
   // Network-first for live API calls (geocoding / climate / property / AI); never cache those.
   if (url.hostname.indexOf("nominatim") !== -1 || url.hostname.indexOf("rentcast") !== -1 || url.hostname.indexOf("open-meteo") !== -1 || url.hostname.indexOf("anthropic") !== -1) {

@@ -17,3 +17,6 @@ yarn-error.log*
 
 # LoadMaster Pro generated single-file preview build
 LoadMaster-Pro-preview.html
+
+# Ops dashboard metrics (local telemetry store)
+data/

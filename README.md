@@ -75,3 +75,43 @@ The **Pro permit search** needs a server. Run the Node server (`npm start`) on a
 host that holds `ANTHROPIC_API_KEY`, or deploy `api/permit-search.cjs` as a
 serverless function and point the app at it by setting `window.LMP_API_BASE` to
 its URL.
+
+## Ops dashboard — full control board
+
+```bash
+npm start          # then open http://localhost:8099/dashboard
+```
+
+The repo ships with a **self-hosted, zero-dependency observability stack** covering
+the whole product, front end to back end:
+
+- **`metrics.js`** (client) — on every page: page views with device/OS/browser/
+  network context, Core Web Vitals (LCP, INP, CLS, TTFB, FCP + page weight), JS
+  errors & unhandled rejections, offline drops, PWA install events, CTA clicks,
+  and product funnel events (calc start/success/fail, durations, TrueClimate vs
+  station source, RentCast vs estimated ft², tonnage, city/state, PhotoScan AI,
+  reports, shares, signups, logins, settings changes).
+- **`api/metrics.cjs`** (server) — logs every HTTP request (method, path, status,
+  latency, bytes, UA, referrer), every PermitIQ call (duration, model, sources,
+  errors), and live system health (memory, event-loop lag, load, uptime). Stores
+  events in an append-only JSONL at `data/metrics.jsonl` (gitignored) plus an
+  in-memory ring buffer that survives restarts.
+- **`dashboard.html`** — the control board at `/dashboard`:
+
+| Tab | What it shows |
+|---|---|
+| **Overview** | KPI cards w/ sparklines & period deltas, traffic chart, conversion funnel, system health, smart alerts (5xx, LCP, error rate, missing API key/SDK, permit success…) |
+| **Traffic** | Views/visitors over time, top pages, referrers, devices, browsers, OS, networks, screens, languages, new vs returning, hour-of-day heatmap, sessions & bounce |
+| **Frontend** | Core Web Vitals gauges (p50/p75/p90 vs Google thresholds), load-time & page-weight distributions, vitals by device/network, JS error log, PWA installs & offline |
+| **Product** | Job funnel, calc success/duration, TrueClimate & RentCast adoption, tonnage histogram, top cities/states, PhotoScan AI impact, signups by plan, CTA clicks, manual-adjust frequency |
+| **Backend** | Throughput, status codes, latency p50/p95/p99 by route, PermitIQ deep-dive (success, duration, sources, errors), live server resources, slowest requests, 404s |
+| **Live feed** | Real-time request stream + product event feed, filterable by text/status |
+
+Controls: time range (15m–All), 5-second live refresh (pausable), **Export**
+(raw JSONL), **Reset**, and **Demo data** — 48h of clearly-marked sample data so
+you can explore the board before real traffic exists.
+
+**Privacy by design:** metrics never contain street addresses, emails, API keys
+or IP addresses. Visitors get random ids; calculations report only city/state.
+Everything stays on your server. Client telemetry is fire-and-forget — on static
+hosts (GitHub Pages) it silently no-ops and the app runs exactly as before.

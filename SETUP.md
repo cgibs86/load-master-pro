@@ -93,3 +93,13 @@ Notes:
   the per-user step.
 - **Legal**: add a Terms/Privacy page before charging (plenty of SaaS templates exist); the
   in-app disclaimers about Manual J estimates and permit verification are already in place.
+
+## Ops dashboard (metrics & monitoring)
+
+`npm start` and open **/dashboard** — a self-hosted control board (zero
+dependencies) covering traffic, Core Web Vitals, product funnel, PermitIQ API
+health, server resources, and a live request stream. Metrics live in
+`data/metrics.jsonl` (gitignored, auto-created) and survive restarts. Nothing
+leaves your server: no addresses, emails, keys, or IPs are ever recorded — see
+README "Ops dashboard" for details. The **Demo data** button seeds 48h of
+sample data so you can explore the board instantly; **Reset** wipes everything.
