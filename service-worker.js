@@ -1,5 +1,5 @@
 /* BTU.ai — offline service worker */
-var CACHE = "btuai-v8";
+var CACHE = "btuai-v9";
 var ASSETS = [
   "./",
   "./index.html",

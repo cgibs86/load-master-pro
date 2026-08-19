@@ -831,6 +831,10 @@
 
     var cb = r.cooling.breakdown;
     var html =
+      '<div class="rp-toolbar">' +
+        '<button id="rpCloseBtn">Close</button>' +
+        '<button class="primary" id="rpPrintBtn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>Print / Save PDF</button>' +
+      '</div>' +
       '<div class="rp">' +
         '<header class="rp-head">' +
           '<div class="rp-brand">' + logo + '<div class="rp-co"><b>' + escapeHtml(company) + '</b>' +
@@ -885,7 +889,13 @@
       '</div>';
 
     $("#reportRoot").innerHTML = html;
-    setTimeout(function () { window.print(); }, 80);
+    $("#reportRoot").scrollTop = 0;
+    $("#rpCloseBtn").addEventListener("click", closeReport);
+    $("#rpPrintBtn").addEventListener("click", function () { window.print(); });
+  }
+
+  function closeReport() {
+    $("#reportRoot").innerHTML = "";
   }
 
   // AI photo-analysis appendix: what the photos showed and which inputs
@@ -1202,7 +1212,6 @@
     renderAcct();
 
     renderHistory();
-    window.addEventListener("afterprint", function () { $("#reportRoot").innerHTML = ""; });
 
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", function () { navigator.serviceWorker.register("service-worker.js").catch(function () {}); });
