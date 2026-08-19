@@ -1,4 +1,4 @@
-# LoadMaster Pro
+# BTU.ai
 
 HVAC load calculator — an address-based residential heating & cooling load
 estimator, built as an installable Progressive Web App (PWA).

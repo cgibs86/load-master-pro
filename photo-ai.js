@@ -1,5 +1,5 @@
 /*
- * LoadMaster Pro — AI photo analysis (PhotoScan).
+ * BTU.ai — AI photo analysis (PhotoScan).
  *
  * Sends the job-site photos to the Claude vision API and returns structured
  * observations about the home (sun exposure, insulation quality, windows,

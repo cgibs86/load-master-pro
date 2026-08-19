@@ -2,7 +2,7 @@
   "name": "load-master-pro",
   "version": "1.0.0",
   "private": true,
-  "description": "LoadMaster Pro — address-based residential HVAC load calculator PWA",
+  "description": "BTU.ai — the HVAC industry's own AI: address-based Manual J–style load calculator PWA",
   "scripts": {
     "start": "node serve.cjs",
     "dev": "node serve.cjs"

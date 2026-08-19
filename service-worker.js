@@ -1,5 +1,5 @@
-/* LoadMaster Pro — offline service worker */
-var CACHE = "loadmaster-v7";
+/* BTU.ai — offline service worker */
+var CACHE = "btuai-v8";
 var ASSETS = [
   "./",
   "./index.html",

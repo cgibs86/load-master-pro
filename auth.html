@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#070b18" />
-  <title>Sign in — LoadMaster AI</title>
+  <title>Sign in — BTU.ai</title>
   <link rel="icon" type="image/svg+xml" href="icons/icon.svg" />
   <link rel="stylesheet" href="landing.css" />
 </head>
@@ -16,7 +16,7 @@
         <span class="brand-mark" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v9.6" stroke="#06122b" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="16.5" r="3.4" fill="#06122b"/><path d="M7 8a5 5 0 0 1 10 0" stroke="#06122b" stroke-width="2.2" stroke-linecap="round"/></svg>
         </span>
-        <span><b>LoadMaster&nbsp;<span class="grad">AI</span></b><small>THE HVAC INDUSTRY'S OWN AI</small></span>
+        <span><b>BTU<span class="grad">.ai</span></b><small>THE HVAC INDUSTRY'S OWN AI</small></span>
       </a>
       <div class="nav-links">
         <a href="index.html#pricing" class="hide-m">Pricing</a>
@@ -27,7 +27,7 @@
 
   <main class="auth-main">
     <div class="auth-card">
-      <a class="brand" href="index.html" aria-label="LoadMaster AI home">
+      <a class="brand" href="index.html" aria-label="BTU.ai home">
         <span class="brand-mark" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v9.6" stroke="#06122b" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="16.5" r="3.4" fill="#06122b"/><path d="M7 8a5 5 0 0 1 10 0" stroke="#06122b" stroke-width="2.2" stroke-linecap="round"/></svg>
         </span>
@@ -53,7 +53,7 @@
         <button class="btn btn-primary" id="authSubmit" type="submit">Log in</button>
       </form>
 
-      <p class="auth-alt" id="authAlt">New to LoadMaster? <a href="#signup" id="altLink">Start your free trial</a></p>
+      <p class="auth-alt" id="authAlt">New to BTU.ai? <a href="#signup" id="altLink">Start your free trial</a></p>
       <p class="auth-alt"><a href="app.html">Continue as guest →</a></p>
       <p class="auth-note">Your account is stored securely on this device. Team sync and billing activate when your company's workspace goes live.</p>
     </div>
@@ -94,7 +94,7 @@
       $("#authSubmit").textContent = m === "signup" ? "Create account — start free trial" : "Log in";
       $("#authAlt").innerHTML = m === "signup"
         ? 'Already have an account? <a href="#" id="altLink">Log in</a>'
-        : 'New to LoadMaster? <a href="#signup" id="altLink">Start your free trial</a>';
+        : 'New to BTU.ai? <a href="#signup" id="altLink">Start your free trial</a>';
       $("#altLink").addEventListener("click", function (e) { e.preventDefault(); setMode(m === "signup" ? "login" : "signup"); });
       $("#fPass").setAttribute("autocomplete", m === "signup" ? "new-password" : "current-password");
       err("");

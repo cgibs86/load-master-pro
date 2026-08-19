@@ -1,4 +1,4 @@
-/* Zero-dependency PNG icon generator for LoadMaster Pro.
+/* Zero-dependency PNG icon generator for BTU.ai.
  * Renders the brand thermometer mark at several sizes. Run: node generate-icons.js */
 var zlib = require("zlib");
 var fs = require("fs");

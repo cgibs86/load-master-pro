@@ -1,5 +1,5 @@
 /*
- * LoadMaster Pro — TrueClimate engine.
+ * BTU.ai — TrueClimate engine.
  *
  * Computes site-specific HVAC design conditions by analyzing a full year of
  * historical hourly weather (~8,760 hours) for the exact coordinates, via the

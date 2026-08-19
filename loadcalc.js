@@ -1,5 +1,5 @@
 /*
- * LoadMaster Pro — residential block load engine (v2).
+ * BTU.ai — residential block load engine (v2).
  *
  * An engineering ESTIMATE in the spirit of ACCA Manual J: whole-house heating
  * and cooling loads from a compact set of inputs plus location design
