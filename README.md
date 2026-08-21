@@ -7,6 +7,11 @@ Enter a street address and get an instant ACCA *Manual J*–style block-load
 estimate (heating BTU/h, cooling BTU/h, and recommended A/C tonnage), with a
 transparent breakdown. Works offline once installed.
 
+The estimate also accounts for attic insulation R-value and duct
+type/location/sealing condition, and includes an optional return-air sizing
+check against the ~144 sq in/ton field rule — all entered when known and
+falling back to sensible defaults when not.
+
 > **Estimating tool only.** Results are a Manual J–style approximation for quick
 > sizing guidance — not a stamped engineering report. Confirm final equipment
 > sizing with a licensed HVAC professional.
