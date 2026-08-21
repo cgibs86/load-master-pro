@@ -1,4 +1,4 @@
-# BTU.ai — Go-Live Guide
+# LoadMaster Pro AI — Go-Live Guide
 
 The app is 100% static files — no build step, no server required. This guide takes you from
 repo → live site → charging money.

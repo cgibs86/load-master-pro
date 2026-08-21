@@ -1,5 +1,6 @@
-/* Zero-dependency PNG icon generator for BTU.ai.
- * Renders the brand thermometer mark at several sizes. Run: node generate-icons.js */
+/* Zero-dependency PNG icon generator for LoadMaster Pro AI.
+ * Renders the brand M-monogram (roofline) + AI sparkle mark at several sizes.
+ * Run: node generate-icons.cjs */
 var zlib = require("zlib");
 var fs = require("fs");
 var path = require("path");
@@ -24,17 +25,7 @@ function render(S, opts) {
     }
   }
 
-  var WHITE = [246, 251, 255], RED = [255, 91, 91];
-  // content placement (tighter & centered for maskable safe zone)
-  var yTop = (opts.maskable ? 0.27 : 0.22) * S;
-  var cyb = (opts.maskable ? 0.67 : 0.74) * S;
-  var sc = opts.maskable ? 0.85 : 1;
-  var cx = 0.5 * S;
-  var stemHalf = 0.047 * S * sc;
-  var bulbR = 0.118 * S * sc;
-  var mStemHalf = 0.024 * S * sc;
-  var mTop = (opts.maskable ? 0.45 : 0.41) * S;
-  var mBulbR = 0.080 * S * sc;
+  var WHITE = [246, 251, 255], GOLD = [255, 193, 87];
 
   function blend(x, y, col, a) {
     if (x < 0 || y < 0 || x >= S || y >= S || a <= 0) return;
@@ -44,42 +35,71 @@ function render(S, opts) {
     buf[i + 1] = lerp(buf[i + 1], col[1], a);
     buf[i + 2] = lerp(buf[i + 2], col[2], a);
   }
-  function capsule(halfW, top, bottom, col) {
-    for (var y = 0; y < S; y++) {
-      for (var x = 0; x < S; x++) {
-        var d;
-        if (y < top) d = Math.hypot(x - cx, y - top) - halfW;
-        else if (y > bottom) continue; // bottom handled by bulb circle
-        else d = Math.abs(x - cx) - halfW;
-        blend(x, y, col, clamp01(0.5 - d)); // ~1px AA edge
+
+  // Distance from point to a line segment (for rounded-cap/join thick strokes).
+  function distToSeg(px, py, x0, y0, x1, y1) {
+    var dx = x1 - x0, dy = y1 - y0;
+    var len2 = dx * dx + dy * dy;
+    var tt = len2 === 0 ? 0 : ((px - x0) * dx + (py - y0) * dy) / len2;
+    tt = tt < 0 ? 0 : tt > 1 ? 1 : tt;
+    var cx = x0 + tt * dx, cy = y0 + tt * dy;
+    return Math.hypot(px - cx, py - cy);
+  }
+  function thickPolyline(pts, halfW, col) {
+    for (var seg = 0; seg < pts.length - 1; seg++) {
+      var x0 = pts[seg][0], y0 = pts[seg][1], x1 = pts[seg + 1][0], y1 = pts[seg + 1][1];
+      var minX = Math.max(0, Math.floor(Math.min(x0, x1) - halfW - 1)), maxX = Math.min(S, Math.ceil(Math.max(x0, x1) + halfW + 1));
+      var minY = Math.max(0, Math.floor(Math.min(y0, y1) - halfW - 1)), maxY = Math.min(S, Math.ceil(Math.max(y0, y1) + halfW + 1));
+      for (var y = minY; y < maxY; y++) {
+        for (var x = minX; x < maxX; x++) {
+          var d = distToSeg(x + 0.5, y + 0.5, x0, y0, x1, y1) - halfW;
+          if (d < 1) blend(x, y, col, clamp01(0.5 - d));
+        }
       }
     }
-  }
-  function disc(ccx, ccy, rad, col) {
-    var y0 = Math.max(0, Math.floor(ccy - rad - 1)), y1 = Math.min(S, Math.ceil(ccy + rad + 1));
-    for (var y = y0; y < y1; y++) {
-      for (var x = 0; x < S; x++) {
-        var d = Math.hypot(x - ccx, y - ccy) - rad;
-        if (d < 1) blend(x, y, col, clamp01(0.5 - d));
-      }
-    }
-  }
-  function tick(yc, w) {
-    var x0 = cx + stemHalf + 0.022 * S, x1 = x0 + w, h = 0.013 * S;
-    for (var y = Math.floor(yc - h); y <= yc + h; y++)
-      for (var x = Math.floor(x0); x <= x1; x++) blend(x, y, WHITE, 0.95);
   }
 
-  capsule(stemHalf, yTop, cyb, WHITE);
-  disc(cx, yTop, stemHalf, WHITE);
-  disc(cx, cyb, bulbR, WHITE);
-  capsule(mStemHalf, mTop, cyb, RED);
-  disc(cx, mTop, mStemHalf, RED);
-  disc(cx, cyb, mBulbR, RED);
-  if (!opts.maskable) {
-    var tx = cx + stemHalf;
-    [0.30, 0.355, 0.41, 0.465].forEach(function (f, idx) { tick(f * S, (idx % 2 ? 0.05 : 0.075) * S); });
+  // Filled polygon (ray casting, 3x3 supersampled for anti-aliased edges) — used for the sparkle.
+  function pointInPoly(px, py, poly) {
+    var inside = false;
+    for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      var xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+      var hit = ((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
+      if (hit) inside = !inside;
+    }
+    return inside;
   }
+  function filledPoly(poly, col) {
+    var xs = poly.map(function (p) { return p[0]; }), ys = poly.map(function (p) { return p[1]; });
+    var minX = Math.max(0, Math.floor(Math.min.apply(null, xs))), maxX = Math.min(S, Math.ceil(Math.max.apply(null, xs)));
+    var minY = Math.max(0, Math.floor(Math.min.apply(null, ys))), maxY = Math.min(S, Math.ceil(Math.max.apply(null, ys)));
+    var N = 3;
+    for (var y = minY; y < maxY; y++) {
+      for (var x = minX; x < maxX; x++) {
+        var cov = 0;
+        for (var sy = 0; sy < N; sy++) {
+          for (var sx = 0; sx < N; sx++) {
+            if (pointInPoly(x + (sx + 0.5) / N, y + (sy + 0.5) / N, poly)) cov++;
+          }
+        }
+        if (cov > 0) blend(x, y, col, clamp01(cov / (N * N)));
+      }
+    }
+  }
+
+  // Content blueprint drawn in a 24-unit box, scaled + centered into this SxS canvas
+  // (tighter scale for maskable so the M + sparkle stay inside the safe zone).
+  var sc = opts.maskable ? 0.72 : 0.88;
+  var k = (S / 24) * sc;
+  var offX = (S - 24 * k) / 2;
+  var offY = offX;
+  function P(x, y) { return [offX + x * k, offY + y * k]; }
+
+  var mPts = [P(5, 19), P(5, 7), P(12, 14), P(19, 7), P(19, 19)];
+  thickPolyline(mPts, 1.15 * k, WHITE);
+
+  var sparkPts = [P(19.4, 1.7), P(20, 3.4), P(21.7, 4), P(20, 4.6), P(19.4, 6.3), P(18.8, 4.6), P(17.1, 4), P(18.8, 3.4)];
+  filledPoly(sparkPts, GOLD);
 
   return buf;
 }

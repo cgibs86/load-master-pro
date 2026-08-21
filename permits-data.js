@@ -1,5 +1,5 @@
 /*
- * BTU.ai — PermitIQ data engine.
+ * LoadMaster Pro AI — PermitIQ data engine.
  *
  * Sources of truth embedded here:
  *  - Federal minimum efficiency standards (DOE, effective Jan 1 2023):
@@ -96,7 +96,7 @@
   // What a typical mechanical permit application package must contain.
   var SUBMITTAL = [
     "Completed mechanical permit application (city form or online portal)",
-    "Load calculation report (this BTU.ai report; full Manual J for final submittal where required)",
+    "Load calculation report (this LoadMaster Pro AI report; full Manual J for final submittal where required)",
     "Equipment specification: make/model, capacity, SEER2/HSPF2/AFUE ratings",
     "Site/plot sketch or photos showing outdoor-unit location and setbacks",
     "Contractor license number and proof of insurance",

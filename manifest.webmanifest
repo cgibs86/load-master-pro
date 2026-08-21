@@ -1,7 +1,7 @@
 {
-  "name": "BTU.ai — HVAC Load Calculator",
-  "short_name": "BTU.ai",
-  "description": "The HVAC industry's own AI — load calcs from an address, refined by site photos, with per-city permit intelligence.",
+  "name": "LoadMaster Pro AI — HVAC Load Calculator",
+  "short_name": "LoadMaster",
+  "description": "Load calcs, mastered by AI — automatic address-based Manual J–style load calculations, refined by site photos, with per-city permit intelligence.",
   "start_url": "./app.html",
   "scope": "./",
   "display": "standalone",

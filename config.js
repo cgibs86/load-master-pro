@@ -1,5 +1,5 @@
 /*
- * BTU.ai — deployment configuration.
+ * LoadMaster Pro AI — deployment configuration.
  *
  * Stripe Payment Links (no backend needed):
  *   1. In the Stripe dashboard create three Payment Links (Solo $19/mo,

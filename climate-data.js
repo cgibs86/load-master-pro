@@ -1,5 +1,5 @@
 /*
- * BTU.ai — US climate design data
+ * LoadMaster Pro AI — US climate design data
  *
  * Representative US locations with ASHRAE-style design conditions:
  *   heating99  = 99% winter design dry-bulb temperature (°F)

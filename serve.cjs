@@ -1,4 +1,4 @@
-/* BTU.ai — zero-dependency static dev server.
+/* LoadMaster Pro AI — zero-dependency static dev server.
  * Serves the repo root (the app) so you can run the PWA locally with
  * a single command (`npm start`). No external packages required.
  *
@@ -88,7 +88,7 @@ const server = http.createServer(function (req, res) {
 });
 
 server.listen(PORT, function () {
-  console.log("\n  BTU.ai running:  http://localhost:" + PORT + "\n");
+  console.log("\n  LoadMaster Pro AI running:  http://localhost:" + PORT + "\n");
   console.log("  Serving: " + ROOT);
   console.log("  Press Ctrl+C to stop.\n");
 });

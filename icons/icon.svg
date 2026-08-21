@@ -11,18 +11,8 @@
   </defs>
   <rect width="512" height="512" rx="112" fill="url(#bg)"/>
   <rect width="512" height="512" rx="112" fill="url(#hi)"/>
-  <g stroke="#f6fbff" stroke-width="30" stroke-linecap="round" fill="none">
-    <path d="M256 150 a52 52 0 1 1 0 0" opacity="0"/>
-  </g>
-  <!-- thermometer -->
-  <rect x="232" y="120" width="48" height="250" rx="24" fill="#f6fbff"/>
-  <circle cx="256" cy="378" r="58" fill="#f6fbff"/>
-  <rect x="244" y="210" width="24" height="168" rx="12" fill="#ff5b5b"/>
-  <circle cx="256" cy="378" r="40" fill="#ff5b5b"/>
-  <g fill="#f6fbff" opacity="0.95">
-    <rect x="292" y="150" width="40" height="12" rx="6"/>
-    <rect x="292" y="192" width="28" height="12" rx="6"/>
-    <rect x="292" y="234" width="40" height="12" rx="6"/>
-    <rect x="292" y="276" width="28" height="12" rx="6"/>
-  </g>
+  <!-- LoadMaster monogram: an "M" whose twin peaks double as a roofline -->
+  <path d="M107 405 L107 149 L256 299 L405 149 L405 405" fill="none" stroke="#f6fbff" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- AI sparkle accent -->
+  <path d="M414 36 L427 73 L463 85 L427 98 L414 134 L401 98 L365 85 L401 73 Z" fill="#ffc157"/>
 </svg>

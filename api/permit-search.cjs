@@ -1,5 +1,5 @@
 /*
- * BTU.ai — Permit & code research endpoint (Pro feature).
+ * LoadMaster Pro AI — Permit & code research endpoint (Pro feature).
  *
  * Given a US city/state (and optional full address), uses Claude with the
  * web_search server tool to find residential HVAC (outdoor condenser unit)
