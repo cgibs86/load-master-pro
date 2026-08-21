@@ -175,6 +175,7 @@ body.has-results .search-card { margin-top: 6px; }
 .chip svg { opacity: 0.8; }
 .chip b { color: var(--text); font-weight: 700; }
 .chip.warn { background: rgba(255, 176, 32, 0.1); border-color: rgba(255, 176, 32, 0.3); color: #ffd591; }
+.chip.ok { background: rgba(76, 217, 140, 0.14); border-color: rgba(76, 217, 140, 0.35); color: #8df0b8; }
 .chip.tap { cursor: pointer; }
 .chip.tap:active { transform: scale(0.96); }
 
@@ -326,6 +327,15 @@ footer .disc { display: block; margin-top: 6px; }
 .hp-legend .lg::before { content: ""; width: 14px; height: 3px; border-radius: 2px; }
 .hp-legend .lg.heat::before { background: #ff8a5c; }
 .hp-legend .lg.cool::before { background: #3ad7e6; }
+
+/* ---------- Return air check ---------- */
+.retair-card {
+  margin-top: 14px; border-radius: var(--radius); padding: 16px 18px 14px;
+  background: var(--card); border: 1px solid var(--border); box-shadow: var(--shadow-sm);
+  animation: rise 0.6s ease both; animation-delay: 0.17s;
+}
+.retair-card .ico { background: rgba(58, 215, 230, 0.16); color: #87e6f1; }
+.retair-status { margin-top: 10px; }
 .hp-text { margin: 10px 0 2px; font-size: 12.5px; color: var(--muted); line-height: 1.55; }
 .hp-text b { color: var(--text); }
 

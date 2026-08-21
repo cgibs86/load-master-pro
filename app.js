@@ -263,6 +263,7 @@
       '</div>' +
 
       hpCard(r, c) +
+      returnAirCard() +
       photosCard() +
       photoInsightsCard() +
       permitCard() +
@@ -289,6 +290,7 @@
     $("#shareBtn").addEventListener("click", shareResult);
     wirePhotos();
     wirePermit();
+    wireReturnAir();
 
     saveActiveToHistory();
     el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -597,6 +599,40 @@
         '<p class="hp-text">' + auxText + '</p>' +
       '</div>';
   }
+
+  // ---------- Return air adequacy check ----------
+  // Not plan-gated: validates the return side of the duct system against the
+  // equipment's required airflow. Renders nothing until the user has set a
+  // return-air mode in Fine-tune inputs.
+  function returnAirCard() {
+    var o = state.overrides, r = state.result;
+    if (!o.retAirMode) return "";
+    var check = window.LoadCalc.returnAirCheck({
+      mode: o.retAirMode,
+      ductDiameterIn: o.retAirDuctIn,
+      grilleW: o.retAirGrilleW,
+      grilleH: o.retAirGrilleH,
+      requiredCfm: r.equipment.airflowCfm,
+      tons: r.recommendedTons
+    });
+    if (!check) return "";
+    var badge = check.ok == null ? "" : check.ok
+      ? '<span class="chip ok">Adequate</span>'
+      : '<span class="chip warn">Likely undersized</span>';
+    return '' +
+      '<div class="retair-card">' +
+        '<div class="hp-head"><span class="ico">' + returnAirIcon() + '</span>Return air check<span class="ph-count">' + check.mode + '</span></div>' +
+        '<p class="hp-text">' + escapeHtml(check.message) + '</p>' +
+        '<div class="retair-status">' + badge + '</div>' +
+        '<p class="pq-disc">' + escapeHtml(check.disclosure) + '</p>' +
+      '</div>';
+  }
+  function wireReturnAir() {
+    // Pure display card for now — no click handlers of its own. Present for
+    // symmetry with wirePhotos()/wirePermit() and as a hook for future
+    // interactivity (e.g. a "learn more" toggle).
+  }
+  function returnAirIcon() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h13"/><path d="M12 7l5 5-5 5"/><path d="M21 5v14"/></svg>'; }
 
   function detailsBlock(r, c, e, qualityLabel) {
     var cb = r.cooling.breakdown;
