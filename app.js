@@ -227,6 +227,18 @@
     if (ductType != null) opts.ductType = ductType;
     if (ductCondition != null) opts.ductCondition = ductCondition;
     state.result = window.LoadCalc.compute(opts);
+    // Return-air adequacy is validation-only (doesn't feed back into the load),
+    // so it's computed once here off the just-computed result and stored on
+    // state.result.returnAir — the single source both the on-screen card and
+    // the printed report read from.
+    state.result.returnAir = retAirMode ? window.LoadCalc.returnAirCheck({
+      mode: retAirMode,
+      ductDiameterIn: retAirDuctIn,
+      grilleW: retAirGrilleW,
+      grilleH: retAirGrilleH,
+      requiredCfm: state.result.equipment.airflowCfm,
+      tons: state.result.recommendedTons
+    }) : null;
   }
 
   // Subscription tier: 0 guest · 1 solo · 2 trial/pro · 3 fleet.
@@ -626,16 +638,7 @@
   // equipment's required airflow. Renders nothing until the user has set a
   // return-air mode in Fine-tune inputs.
   function returnAirCard() {
-    var o = state.overrides, r = state.result;
-    if (!o.retAirMode) return "";
-    var check = window.LoadCalc.returnAirCheck({
-      mode: o.retAirMode,
-      ductDiameterIn: o.retAirDuctIn,
-      grilleW: o.retAirGrilleW,
-      grilleH: o.retAirGrilleH,
-      requiredCfm: r.equipment.airflowCfm,
-      tons: r.recommendedTons
-    });
+    var check = state.result && state.result.returnAir;
     if (!check) return "";
     var badge = check.ok == null ? "" : check.ok
       ? '<span class="chip ok">Adequate</span>'
