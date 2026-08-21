@@ -198,13 +198,34 @@
     var rangePct = p.source === "fetched" ? 0.10 : 0.15;
     // Photo evidence tightens the confidence band a notch on estimated homes.
     if (p.source !== "fetched" && Object.keys(pa).length) rangePct = 0.12;
-    state.effective = { area: area, bedrooms: bedrooms, quality: quality, foundation: foundation, sun: sun, systemType: systemType, ceiling: ceiling, rangePct: rangePct };
+    // Optional fine-tune inputs: attic insulation, duct type/condition, return-air sizing.
+    // Unset (undefined) means "use legacy/default behavior" in the calc engine.
+    var atticR = o.atticR != null ? o.atticR : undefined;
+    var ductType = o.ductType || undefined;
+    var ductCondition = o.ductCondition || undefined;
+    var retAirMode = o.retAirMode || undefined;
+    var retAirDuctIn = o.retAirDuctIn != null ? o.retAirDuctIn : undefined;
+    var retAirGrilleW = o.retAirGrilleW != null ? o.retAirGrilleW : undefined;
+    var retAirGrilleH = o.retAirGrilleH != null ? o.retAirGrilleH : undefined;
+    state.effective = {
+      area: area, bedrooms: bedrooms, quality: quality, foundation: foundation, sun: sun, systemType: systemType, ceiling: ceiling, rangePct: rangePct,
+      atticR: atticR, ductType: ductType, ductCondition: ductCondition,
+      retAirMode: retAirMode, retAirDuctIn: retAirDuctIn, retAirGrilleW: retAirGrilleW, retAirGrilleH: retAirGrilleH
+    };
     var opts = {
       area: area, bedrooms: bedrooms, quality: quality, foundation: foundation, sun: sun, systemType: systemType, ceiling: ceiling,
       heating99: c.heating99, cooling1: c.cooling1, outGrains: c.outGrains,
       elevFt: c.elevFt || 0, rangePct: rangePct
     };
     if (pa.windowFrac != null) opts.windowFrac = pa.windowFrac;
+    // Only set when the user has actually specified them — an explicit ductType
+    // signals the calc engine to use the new duct-loss formula; omitted keeps
+    // legacy behavior. (retAir* fields are for the separate return-air adequacy
+    // check being wired up in a sibling change — not consumed by compute() —
+    // so they're captured into state above but intentionally left off opts here.)
+    if (atticR != null) opts.atticR = atticR;
+    if (ductType != null) opts.ductType = ductType;
+    if (ductCondition != null) opts.ductCondition = ductCondition;
     state.result = window.LoadCalc.compute(opts);
   }
 
@@ -627,6 +648,9 @@
             kv("Indoor setpoints", "75°F cool · 70°F heat") +
             kv("Sensible cooling", fmt(r.cooling.sensible) + " BTU/h") +
             kv("Latent cooling", fmt(r.cooling.latent) + " BTU/h") +
+            (e.atticR != null ? kv("Attic insulation", "R-" + e.atticR) : "") +
+            (e.ductType ? kv("Duct location", ductTypeLabel(e.ductType)) : "") +
+            (e.ductCondition ? kv("Duct condition", e.ductCondition === "sealed" ? "Sealed &amp; insulated" : "Unsealed / uninsulated") : "") +
           '</div>' +
         '</div>' +
       '</details>';
@@ -666,6 +690,31 @@
             '<div><label>Ceiling height (ft)</label>' +
             '<input type="number" id="inCeiling" min="7" max="20" step="0.5" value="' + e.ceiling + '" /></div>' +
           '</div>' +
+          '<label>Attic insulation (R-value, optional)</label>' +
+          '<input type="number" id="inAtticR" min="0" max="100" step="1" placeholder="leave blank to use construction tier above" value="' + (e.atticR != null ? e.atticR : "") + '" />' +
+          '<div class="adjust-row">' +
+            '<div><label>Duct location</label>' +
+              '<select id="inDuctType">' +
+                '<option value=""' + (!e.ductType ? " selected" : "") + '>Not specified</option>' +
+                opt("attic", "Ducted — in unconditioned attic", e.ductType) +
+                opt("conditioned-space", "Ducted — in conditioned space", e.ductType) +
+                opt("crawlspace", "Ducted — in crawlspace", e.ductType) +
+                opt("ductless", "Ductless / mini-split", e.ductType) +
+              '</select></div>' +
+            '<div id="ductCondWrap"' + (e.ductType === "ductless" ? ' style="display:none"' : '') + '>' +
+              '<label>Duct condition</label>' +
+              '<select id="inDuctCondition">' +
+                '<option value=""' + (!e.ductCondition ? " selected" : "") + '>Not specified</option>' +
+                opt("sealed", "Sealed &amp; insulated", e.ductCondition) + opt("unsealed", "Unsealed / uninsulated", e.ductCondition) +
+              '</select></div>' +
+          '</div>' +
+          '<label>Return air</label>' +
+          '<select id="inRetAirMode">' +
+            '<option value=""' + (!e.retAirMode ? " selected" : "") + '>Not specified</option>' +
+            opt("ducted", "Ducted return (has a return trunk)", e.retAirMode) +
+            opt("grille", "Direct return grille (no trunk)", e.retAirMode) +
+          '</select>' +
+          '<div id="retAirFields">' + retAirFieldsHtml(e.retAirMode, e) + '</div>' +
           '<button class="recalc" id="recalcBtn">Recalculate</button>' +
         '</div>' +
       '</details>';
@@ -673,6 +722,24 @@
   function segBtn(val, label, cur) { return '<button data-q="' + val + '" class="' + (cur === val ? "on" : "") + '">' + label + '</button>'; }
   function opt(val, label, cur) { return '<option value="' + val + '"' + (cur === val ? " selected" : "") + '>' + label + '</option>'; }
   function kv(k, v) { return '<div class="kv"><span>' + k + '</span><b>' + v + '</b></div>'; }
+  function ductTypeLabel(t) { return { attic: "Ducted — unconditioned attic", "conditioned-space": "Ducted — conditioned space", crawlspace: "Ducted — crawlspace", ductless: "Ductless / mini-split" }[t] || t; }
+  // Return-air fields swap between a single duct-diameter input (ducted trunk)
+  // and a width/height pair (direct grille) depending on the selected mode.
+  // Used both for the initial render and for the instant swap on mode change
+  // (see wireAdjust), so the two stay in sync without a full recalculate.
+  function retAirFieldsHtml(mode, e) {
+    e = e || {};
+    if (mode === "ducted") {
+      return '<input type="number" id="inRetAirDuctIn" min="4" max="30" step="1" placeholder="Return duct diameter, inches" value="' + (e.retAirDuctIn != null ? e.retAirDuctIn : "") + '" />';
+    }
+    if (mode === "grille") {
+      return '<div class="adjust-row">' +
+        '<div><label>Grille width (in)</label><input type="number" id="inRetAirGrilleW" min="1" max="60" step="1" value="' + (e.retAirGrilleW != null ? e.retAirGrilleW : "") + '" /></div>' +
+        '<div><label>Grille height (in)</label><input type="number" id="inRetAirGrilleH" min="1" max="60" step="1" value="' + (e.retAirGrilleH != null ? e.retAirGrilleH : "") + '" /></div>' +
+      '</div>';
+    }
+    return "";
+  }
 
   function wireAdjust() {
     var seg = $("#segQuality");
@@ -682,6 +749,24 @@
         if (!b) return;
         seg.querySelectorAll("button").forEach(function (x) { x.classList.remove("on"); });
         b.classList.add("on");
+      });
+    }
+    // Duct condition doesn't matter for ductless systems — hide it instantly
+    // on selection change rather than waiting for Recalculate.
+    var ductTypeSel = $("#inDuctType");
+    if (ductTypeSel) {
+      ductTypeSel.addEventListener("change", function () {
+        var wrap = $("#ductCondWrap");
+        if (wrap) wrap.style.display = ductTypeSel.value === "ductless" ? "none" : "";
+      });
+    }
+    // Swap the return-air field(s) (duct diameter vs. grille width/height)
+    // the instant the mode changes, without requiring a Recalculate click.
+    var retModeSel = $("#inRetAirMode");
+    if (retModeSel) {
+      retModeSel.addEventListener("change", function () {
+        var wrap = $("#retAirFields");
+        if (wrap) wrap.innerHTML = retAirFieldsHtml(retModeSel.value, state.effective);
       });
     }
     var rb = $("#recalcBtn");
@@ -697,6 +782,22 @@
       state.overrides.sun = $("#inSun").value;
       state.overrides.systemType = $("#inSystem").value;
       state.overrides.ceiling = isFinite(ceiling) ? ceiling : undefined;
+
+      var atticR = parseFloat($("#inAtticR") ? $("#inAtticR").value : "");
+      state.overrides.atticR = isFinite(atticR) && atticR > 0 ? atticR : undefined;
+      var ductTypeEl = $("#inDuctType");
+      state.overrides.ductType = ductTypeEl && ductTypeEl.value ? ductTypeEl.value : undefined;
+      var ductCondEl = $("#inDuctCondition");
+      state.overrides.ductCondition = ductCondEl && ductCondEl.value ? ductCondEl.value : undefined;
+      var retModeEl = $("#inRetAirMode");
+      state.overrides.retAirMode = retModeEl && retModeEl.value ? retModeEl.value : undefined;
+      var retDuctEl = $("#inRetAirDuctIn"); var retDuctVal = retDuctEl ? parseFloat(retDuctEl.value) : NaN;
+      state.overrides.retAirDuctIn = isFinite(retDuctVal) && retDuctVal > 0 ? retDuctVal : undefined;
+      var retGWEl = $("#inRetAirGrilleW"); var retGWVal = retGWEl ? parseFloat(retGWEl.value) : NaN;
+      state.overrides.retAirGrilleW = isFinite(retGWVal) && retGWVal > 0 ? retGWVal : undefined;
+      var retGHEl = $("#inRetAirGrilleH"); var retGHVal = retGHEl ? parseFloat(retGHEl.value) : NaN;
+      state.overrides.retAirGrilleH = isFinite(retGHVal) && retGHVal > 0 ? retGHVal : undefined;
+
       // Keep displaying as a user-adjusted estimate.
       state.property.source = "estimate";
       compute();
