@@ -821,6 +821,8 @@
     var qualityLabel = { good: "Well insulated", average: "Average construction", poor: "Older / leaky" }[e.quality];
     var foundationLabel = { slab: "Slab", crawl: "Crawl space", basement: "Basement" }[e.foundation] || e.foundation;
     var sunLabel = { low: "Shaded", average: "Average", high: "Sunny" }[e.sun] || e.sun;
+    var ductTypeLabel = { attic: "Ducted — in attic", "conditioned-space": "Ducted — in conditioned space", crawlspace: "Ducted — in crawlspace", ductless: "Ductless / mini-split" }[e.ductType] || e.ductType;
+    var ductConditionLabel = { sealed: "Sealed & insulated", unsealed: "Unsealed / uninsulated" }[e.ductCondition] || e.ductCondition;
     var date = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
     var company = s.company || "LoadMaster Pro AI";
     var contact = [s.phone, s.email].filter(Boolean).join("  •  ");
@@ -867,6 +869,9 @@
             rrow("Sun exposure", sunLabel) +
             rrow("Ceiling height", e.ceiling + " ft") +
             rrow("Stories (est.)", String(r.inputs.stories)) +
+            (e.atticR != null ? rrow("Attic insulation", "R-" + e.atticR) : "") +
+            (e.ductType ? rrow("Duct type / location", ductTypeLabel) : "") +
+            (e.ductType && e.ductType !== "ductless" && e.ductCondition ? rrow("Duct condition", ductConditionLabel) : "") +
           '</table></div>' +
         '</div>' +
         '<div class="rp-block"><h2>Cooling load breakdown</h2><table>' +
@@ -877,6 +882,7 @@
           rrow("Air leakage (sensible + latent)", fmt(cb.infiltration) + " BTU/h") +
           rrow("Sensible / latent split", fmt(r.cooling.sensible) + " / " + fmt(r.cooling.latent) + " BTU/h") +
         '</table></div>' +
+        reportReturnAir() +
         reportPhotos() +
         reportPhotoInsights() +
         (opts.permit ? reportPermitSection() : "") +
@@ -921,6 +927,22 @@
       '<p class="rp-permit-sub">' + escapeHtml(pa.summary) + '</p>' +
       '<table>' + rows + '</table>' + delta +
       '<p class="rp-permit-note">Findings were extracted from the site photos by AI vision analysis and verified against the inputs above; low-confidence observations are listed for reference but did not change the calculation.</p>' +
+    '</div>';
+  }
+
+  // Return-air adequacy appendix: only renders when a return-air check result
+  // exists on state.result (populated by the sibling return-air check unit).
+  function reportReturnAir() {
+    var ra = state.result && state.result.returnAir;
+    if (!ra) return "";
+    var sizeLabel = ra.mode === "ducted" ? "Return duct capacity (est.)" : "Return grille free area (est.)";
+    var sizeValue = ra.mode === "ducted" ? fmt(ra.providedValue) + " CFM" : fmt(ra.providedValue) + " sq in" + (ra.sqInPerTon ? " (" + ra.sqInPerTon + " sq in/ton)" : "");
+    return '<div class="rp-block"><h2>Return air sizing</h2><table>' +
+      rrow(sizeLabel, sizeValue) +
+      (ra.requiredValue != null ? rrow(ra.mode === "ducted" ? "Required airflow" : "Required free area", fmt(ra.requiredValue) + (ra.mode === "ducted" ? " CFM" : " sq in")) : "") +
+      rrow("Assessment", ra.ok === true ? "Adequate" : ra.ok === false ? "Likely undersized" : "Estimated (not enough info to confirm)") +
+      '</table>' +
+      '<p class="rp-disc" style="margin-top:6px">' + escapeHtml(ra.disclosure || "") + '</p>' +
     '</div>';
   }
 
