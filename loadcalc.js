@@ -18,6 +18,12 @@
     poor:    { uWall: 0.130, uWin: 0.80, shgc: 0.60, uRoof: 0.070, uFloor: 0.100, ach: 0.90 }
   };
 
+  // Non-insulation R of the ceiling/roof assembly (drywall + air films + deck) —
+  // backed out from the existing QUALITY.uRoof constants, which imply clean,
+  // standard nominal insulation levels (R-30/R-19/R-11 for good/average/poor)
+  // at this base value.
+  const ROOF_BASE_R = 3;
+
   const DEFAULTS = {
     area: 2000,          // conditioned floor area, ft²
     bedrooms: 3,
@@ -169,10 +175,18 @@
     const dtHeat = Math.max(0, o.indoorHeat - heating99);
     const dtCool = Math.max(0, cooling1 - o.indoorCool);
 
+    // Attic insulation R-value override: when the caller supplies a real R-value
+    // (>= 5, to guard against stray low entries being a data-entry mistake rather
+    // than a deliberate near-zero-insulation ceiling), derive an effective roof
+    // U-value from it instead of the flat per-quality-tier constant. Omitted or
+    // below the guard -> exact legacy behavior (q.uRoof), unchanged.
+    const atticRNum = o.atticR != null ? Number(o.atticR) : NaN;
+    const uRoofEff = (!isNaN(atticRNum) && atticRNum >= 5) ? 1 / (atticRNum + ROOF_BASE_R) : q.uRoof;
+
     // Conductive UA (BTU/hr·°F). Floor counts for heating, dropped for cooling
     // (ground stays near/below indoor temp in summer).
-    const uaHeat = q.uWall * netWall + q.uWin * windowArea + q.uRoof * roofArea + uFloorEff * floorArea;
-    const uaCool = q.uWall * netWall + q.uWin * windowArea + q.uRoof * roofArea;
+    const uaHeat = q.uWall * netWall + q.uWin * windowArea + uRoofEff * roofArea + uFloorEff * floorArea;
+    const uaCool = q.uWall * netWall + q.uWin * windowArea + uRoofEff * roofArea;
 
     // ---------- HEATING ----------
     const hConduction = uaHeat * dtHeat;

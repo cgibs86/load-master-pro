@@ -117,5 +117,27 @@ for (const city of evCities) {
 console.log("");
 check("tight new construction, mixed-humid southeast avg (EV dataset ≈1,431)", evSum / evCities.length, 950, 1900, " ft²/ton");
 
+console.log("=== Attic R-value override (atticR) ===");
+{
+  const base = { area: 2000, quality: "average", foundation: "slab", sun: "average", bedrooms: 3,
+    heating99: 20, cooling1: 95, outGrains: 100, elevFt: 0, systemType: "single" };
+  const omitted = LoadCalc.compute(base);
+  const r30 = LoadCalc.compute(Object.assign({}, base, { atticR: 30 }));
+  const r2 = LoadCalc.compute(Object.assign({}, base, { atticR: 2 })); // below the R-5 guard
+
+  const omittedMatch = omitted.heating.total === 34375 && omitted.cooling.total === 30753;
+  pass += omittedMatch ? 1 : 0; fail += omittedMatch ? 0 : 1;
+  console.log(`   ${omittedMatch ? "✅" : "❌"} omitting atticR reproduces today's totals exactly: heat ${omitted.heating.total} BTU/h, cool ${omitted.cooling.total} BTU/h (expected 34,375 / 30,753)`);
+
+  const r30Lower = r30.heating.total < omitted.heating.total && r30.cooling.total < omitted.cooling.total;
+  pass += r30Lower ? 1 : 0; fail += r30Lower ? 0 : 1;
+  console.log(`   ${r30Lower ? "✅" : "❌"} atticR:30 measurably lowers roof conduction vs quality:"average" alone: heat ${r30.heating.total} < ${omitted.heating.total}, cool ${r30.cooling.total} < ${omitted.cooling.total}`);
+
+  const guardHolds = r2.heating.total === omitted.heating.total && r2.cooling.total === omitted.cooling.total;
+  pass += guardHolds ? 1 : 0; fail += guardHolds ? 0 : 1;
+  console.log(`   ${guardHolds ? "✅" : "❌"} atticR:2 (below R-5 guard) falls back to the tier default, no crash/near-infinite U: heat ${r2.heating.total} BTU/h (matches omitted ${omitted.heating.total})`);
+}
+console.log("");
+
 console.log(`\n${fail === 0 ? "✅ ALL CHECKS PASSED" : "❌ " + fail + " CHECK(S) FAILED"} (${pass} passed)`);
 process.exit(fail ? 1 : 0);
