@@ -139,5 +139,44 @@ console.log("=== Attic R-value override (atticR) ===");
 }
 console.log("");
 
+console.log("\n=== Duct type/condition -> duct-loss factor ===");
+function checkTrue(label, ok, detail) {
+  ok ? pass++ : fail++;
+  console.log(`   ${ok ? "✅" : "❌"} ${label}${detail ? " (" + detail + ")" : ""}`);
+  return ok;
+}
+{
+  const base = { area: 2000, quality: "average", foundation: "slab", sun: "average", bedrooms: 3,
+    heating99: 20, cooling1: 95, outGrains: 100, elevFt: 0, systemType: "single" };
+  const omitted = LoadCalc.compute(base);
+  const anchor = LoadCalc.compute(Object.assign({}, base, { ductType: "attic", ductCondition: "sealed" }));
+  const ductless = LoadCalc.compute(Object.assign({}, base, { ductType: "ductless" }));
+  const worst = LoadCalc.compute(Object.assign({}, base, { ductType: "attic", ductCondition: "unsealed" }));
+
+  checkTrue(
+    "omitting duct fields reproduces today's totals exactly (attic+sealed anchor)",
+    omitted.heating.total === anchor.heating.total && omitted.cooling.total === anchor.cooling.total,
+    `omitted heat ${omitted.heating.total} vs anchor ${anchor.heating.total}; omitted cool ${omitted.cooling.total} vs anchor ${anchor.cooling.total}`
+  );
+  checkTrue(
+    "ductType: ductless measurably lowers totals vs the default",
+    ductless.heating.total < omitted.heating.total && ductless.cooling.total < omitted.cooling.total,
+    `ductless heat ${ductless.heating.total} < ${omitted.heating.total}; ductless cool ${ductless.cooling.total} < ${omitted.cooling.total}`
+  );
+  checkTrue(
+    "ductType: attic, ductCondition: unsealed measurably raises totals vs the default",
+    worst.heating.total > omitted.heating.total && worst.cooling.total > omitted.cooling.total,
+    `worst heat ${worst.heating.total} > ${omitted.heating.total}; worst cool ${worst.cooling.total} > ${omitted.cooling.total}`
+  );
+
+  const sum = worst.cooling.breakdown.conduction + worst.cooling.breakdown.solar +
+    worst.cooling.breakdown.people + worst.cooling.breakdown.internal + worst.cooling.breakdown.infiltration;
+  checkTrue(
+    "cooling breakdown sums to (approximately) the cooling total for a non-default duct config",
+    Math.abs(sum - worst.cooling.total) <= 2,
+    `breakdown sum ${sum} vs total ${worst.cooling.total}`
+  );
+}
+
 console.log(`\n${fail === 0 ? "✅ ALL CHECKS PASSED" : "❌ " + fail + " CHECK(S) FAILED"} (${pass} passed)`);
 process.exit(fail ? 1 : 0);

@@ -24,6 +24,26 @@
   // at this base value.
   const ROOF_BASE_R = 3;
 
+  // Duct loss/gain factor by location + sealing/insulation condition.
+  // Location matters (conditioned space < crawlspace < unconditioned attic),
+  // but condition matters at least as much: a well-sealed attic system (1.10)
+  // can beat a leaky crawlspace system (1.15) — that's intentional, not an
+  // ordering mistake. attic+sealed is pinned to exactly today's flat 1.10
+  // default so omitting these fields entirely reproduces legacy behavior.
+  const DUCT_FACTORS = {
+    ductless: 1.00,
+    "conditioned-space": { sealed: 1.02, unsealed: 1.05 },
+    crawlspace: { sealed: 1.08, unsealed: 1.15 },
+    attic: { sealed: 1.10, unsealed: 1.20 }
+  };
+
+  function resolveDuctFactor(ductType, ductCondition) {
+    var v = DUCT_FACTORS[ductType];
+    if (v == null) return null;
+    if (typeof v === "number") return v; // ductless
+    return v[ductCondition] != null ? v[ductCondition] : v.sealed;
+  }
+
   const DEFAULTS = {
     area: 2000,          // conditioned floor area, ft²
     bedrooms: 3,
@@ -145,6 +165,19 @@
     const o = Object.assign({}, DEFAULTS, opts || {});
     const q = QUALITY[o.quality] || QUALITY.average;
 
+    // Resolve duct loss factor against the RAW, pre-merge opts — after the
+    // merge above, o.ductFactor is always populated from DEFAULTS, so it's
+    // impossible to tell "caller explicitly set ductFactor" apart from
+    // "caller omitted it" once merged. Falling back to o.ductFactor here
+    // keeps every existing/omitted-field caller bit-for-bit unchanged.
+    var rawOpts = opts || {};
+    var ductFactor = o.ductFactor;
+    if (rawOpts.ductFactor == null && rawOpts.ductType) {
+      var resolved = resolveDuctFactor(rawOpts.ductType, rawOpts.ductCondition);
+      if (resolved != null) ductFactor = resolved;
+    }
+    o.ductFactor = ductFactor; // keep echoed inputs.ductFactor in sync with the value actually used
+
     const heating99 = o.heating99;   // outdoor winter design temp, °F
     const cooling1 = o.cooling1;     // outdoor summer design temp, °F
     const outGrains = o.outGrains;   // outdoor design humidity, grains/lb
@@ -192,7 +225,7 @@
     const hConduction = uaHeat * dtHeat;
     const hInfiltration = sensC * cfm * dtHeat;
     const heatingRaw = (hConduction + hInfiltration) * fnd.heatAdd;
-    const heating = heatingRaw * o.ductFactor;
+    const heating = heatingRaw * ductFactor;
 
     // ---------- COOLING ----------
     const occupants = (o.bedrooms || 0) + 1;
@@ -209,7 +242,7 @@
     const latent = cInfilLat + cPeopleLat;
 
     const coolingRaw = sensible + latent;
-    const cooling = coolingRaw * o.ductFactor;
+    const cooling = coolingRaw * ductFactor;
 
     const tons = cooling / 12000;
     // Manual S-style selection for the chosen system type, plus the
@@ -242,20 +275,20 @@
       heating: {
         total: Math.round(heating),
         range: band(heating),
-        conduction: Math.round(hConduction * fnd.heatAdd * o.ductFactor),
-        infiltration: Math.round(hInfiltration * fnd.heatAdd * o.ductFactor)
+        conduction: Math.round(hConduction * fnd.heatAdd * ductFactor),
+        infiltration: Math.round(hInfiltration * fnd.heatAdd * ductFactor)
       },
       cooling: {
         total: Math.round(cooling),
         range: band(cooling),
-        sensible: Math.round(sensible * o.ductFactor),
-        latent: Math.round(latent * o.ductFactor),
+        sensible: Math.round(sensible * ductFactor),
+        latent: Math.round(latent * ductFactor),
         breakdown: {
-          conduction: Math.round(cConduction * o.ductFactor),
-          solar: Math.round(cSolar * o.ductFactor),
-          people: Math.round((cPeopleSens + cPeopleLat) * o.ductFactor),
-          internal: Math.round(cInternal * o.ductFactor),
-          infiltration: Math.round((cInfilSens + cInfilLat) * o.ductFactor)
+          conduction: Math.round(cConduction * ductFactor),
+          solar: Math.round(cSolar * ductFactor),
+          people: Math.round((cPeopleSens + cPeopleLat) * ductFactor),
+          internal: Math.round(cInternal * ductFactor),
+          infiltration: Math.round((cInfilSens + cInfilLat) * ductFactor)
         }
       },
       tons: Math.round(tons * 100) / 100,
@@ -267,7 +300,7 @@
     };
   }
 
-  const api = { compute, qualityFromYear, airFactor, balancePoint, sizeFor, QUALITY, DEFAULTS };
+  const api = { compute, qualityFromYear, airFactor, balancePoint, sizeFor, resolveDuctFactor, QUALITY, DEFAULTS };
   root.LoadCalc = api;
   if (typeof module !== "undefined" && module.exports) {
     module.exports = api;
