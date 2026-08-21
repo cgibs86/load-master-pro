@@ -161,6 +161,59 @@
     };
   }
 
+  // Return-air-check constants, cross-validated against each other:
+  // 400 CFM/ton / 500 FPM = 115.2 sq in free area/ton; / 0.75 free-area factor
+  // ~= 154 nominal sq in/ton -- within 7% of the independently-known 144 rule,
+  // so all three numbers agree with each other.
+  const RETURN_VELOCITY_FPM = 500;       // design velocity assumption for ducted return sizing
+  const GRILLE_FREE_AREA_FACTOR = 0.75;  // typical louvered grille open-area fraction of nominal size
+  const RETURN_SQIN_PER_TON = 144;       // standard HVAC field rule of thumb, ~1 sq ft opening per ton
+
+  // Validation-only check: does NOT feed back into heating/cooling/tons.
+  // opts: { mode: "ducted"|"grille", ductDiameterIn, grilleW, grilleH, requiredCfm, tons }
+  // requiredCfm and tons should come from a prior compute() result's
+  // equipment.airflowCfm and recommendedTons.
+  function returnAirCheck(opts) {
+    if (!opts || !opts.mode) return null;
+    var requiredCfm = opts.requiredCfm, tons = opts.tons;
+    if (opts.mode === "ducted") {
+      var d = opts.ductDiameterIn;
+      if (!(d > 0)) return null;
+      var areaSqFt = Math.PI * Math.pow(d / 2, 2) / 144;
+      var maxCfm = areaSqFt * RETURN_VELOCITY_FPM;
+      var ok = requiredCfm != null ? maxCfm >= requiredCfm : null;
+      return {
+        mode: "ducted",
+        providedValue: Math.round(maxCfm),
+        requiredValue: requiredCfm != null ? Math.round(requiredCfm) : null,
+        ok: ok,
+        message: ok == null ? "Return duct capacity: " + Math.round(maxCfm) + " CFM (estimated)."
+          : ok ? "Adequate — return duct can move " + Math.round(maxCfm) + " CFM, system needs " + Math.round(requiredCfm) + " CFM."
+               : "Likely undersized — return duct estimated at " + Math.round(maxCfm) + " CFM, system needs " + Math.round(requiredCfm) + " CFM. Consider a larger return or a second return.",
+        disclosure: "Estimated using a 500 ft/min design velocity for return ductwork — a common, quiet-duct residential target. Actual capacity depends on duct material and installation quality."
+      };
+    }
+    if (opts.mode === "grille") {
+      var w = opts.grilleW, h = opts.grilleH;
+      if (!(w > 0) || !(h > 0)) return null;
+      var freeSqIn = w * h * GRILLE_FREE_AREA_FACTOR;
+      var sqInPerTon = tons ? freeSqIn / tons : null;
+      var ok2 = sqInPerTon != null ? sqInPerTon >= RETURN_SQIN_PER_TON : null;
+      return {
+        mode: "grille",
+        providedValue: Math.round(freeSqIn),
+        requiredValue: tons ? Math.round(RETURN_SQIN_PER_TON * tons) : null,
+        sqInPerTon: sqInPerTon != null ? Math.round(sqInPerTon) : null,
+        ok: ok2,
+        message: ok2 == null ? "Return grille free area: ~" + Math.round(freeSqIn) + " sq in (estimated)."
+          : ok2 ? "Adequate — ~" + Math.round(freeSqIn) + " sq in of free area (" + Math.round(sqInPerTon) + " sq in/ton)."
+                : "Likely undersized — ~" + Math.round(freeSqIn) + " sq in of free area is only " + Math.round(sqInPerTon) + " sq in/ton (target: " + RETURN_SQIN_PER_TON + "). Consider a larger grille or a second return.",
+        disclosure: "Assumes a standard louvered return grille (~75% free area). Denser or decorative grille faces pass less air. Screened against the common HVAC field rule of ≥144 sq in of return opening per ton — a rule-of-thumb check, not a Manual D duct design."
+      };
+    }
+    return null;
+  }
+
   function compute(opts) {
     const o = Object.assign({}, DEFAULTS, opts || {});
     const q = QUALITY[o.quality] || QUALITY.average;
@@ -300,7 +353,7 @@
     };
   }
 
-  const api = { compute, qualityFromYear, airFactor, balancePoint, sizeFor, resolveDuctFactor, QUALITY, DEFAULTS };
+  const api = { compute, qualityFromYear, airFactor, balancePoint, sizeFor, resolveDuctFactor, returnAirCheck, QUALITY, DEFAULTS };
   root.LoadCalc = api;
   if (typeof module !== "undefined" && module.exports) {
     module.exports = api;
