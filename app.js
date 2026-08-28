@@ -216,31 +216,44 @@
     // Optional fine-tune inputs: attic insulation, duct type/condition, return-air sizing.
     // Unset (undefined) means "use legacy/default behavior" in the calc engine.
     var atticR = o.atticR != null ? o.atticR : undefined;
+    var windowU = o.windowU != null ? o.windowU : undefined;
+    var windowSHGC = o.windowSHGC != null ? o.windowSHGC : undefined;
+    var ach = o.ach != null ? o.ach : undefined;
     var ductType = o.ductType || undefined;
     var ductCondition = o.ductCondition || undefined;
     var retAirMode = o.retAirMode || undefined;
     var retAirDuctIn = o.retAirDuctIn != null ? o.retAirDuctIn : undefined;
     var retAirGrilleW = o.retAirGrilleW != null ? o.retAirGrilleW : undefined;
     var retAirGrilleH = o.retAirGrilleH != null ? o.retAirGrilleH : undefined;
+    // Window amount and story count: an explicit user entry beats a PhotoScan
+    // AI read, which beats the calc engine's own default/heuristic. Left
+    // undefined (both omitted) keeps exact legacy behavior in loadcalc.js.
+    var windowFrac = o.windowFrac != null ? o.windowFrac : (pa.windowFrac != null ? pa.windowFrac : undefined);
+    var stories = o.stories != null ? o.stories : (pa.stories != null ? pa.stories : undefined);
     state.effective = {
       area: area, bedrooms: bedrooms, quality: quality, foundation: foundation, sun: sun, systemType: systemType, ceiling: ceiling, rangePct: rangePct,
-      atticR: atticR, ductType: ductType, ductCondition: ductCondition,
-      retAirMode: retAirMode, retAirDuctIn: retAirDuctIn, retAirGrilleW: retAirGrilleW, retAirGrilleH: retAirGrilleH
+      atticR: atticR, windowU: windowU, windowSHGC: windowSHGC, ach: ach, ductType: ductType, ductCondition: ductCondition,
+      retAirMode: retAirMode, retAirDuctIn: retAirDuctIn, retAirGrilleW: retAirGrilleW, retAirGrilleH: retAirGrilleH,
+      windowFrac: windowFrac, stories: stories
     };
     var opts = {
       area: area, bedrooms: bedrooms, quality: quality, foundation: foundation, sun: sun, systemType: systemType, ceiling: ceiling,
       heating99: c.heating99, cooling1: c.cooling1, outGrains: c.outGrains,
       elevFt: c.elevFt || 0, rangePct: rangePct
     };
-    if (pa.windowFrac != null) opts.windowFrac = pa.windowFrac;
-    // Only set when the user has actually specified them — an explicit ductType
-    // signals the calc engine to use the new duct-loss formula; omitted keeps
+    // Only set when actually specified — an explicit value signals the calc
+    // engine to use it in place of its own default/heuristic; omitted keeps
     // legacy behavior. (retAir* fields are for the separate return-air adequacy
     // check being wired up in a sibling change — not consumed by compute() —
     // so they're captured into state above but intentionally left off opts here.)
     if (atticR != null) opts.atticR = atticR;
+    if (windowU != null) opts.windowU = windowU;
+    if (windowSHGC != null) opts.windowSHGC = windowSHGC;
+    if (ach != null) opts.ach = ach;
     if (ductType != null) opts.ductType = ductType;
     if (ductCondition != null) opts.ductCondition = ductCondition;
+    if (windowFrac != null) opts.windowFrac = windowFrac;
+    if (stories != null) opts.stories = stories;
     state.result = window.LoadCalc.compute(opts);
     // Return-air adequacy is validation-only (doesn't feed back into the load),
     // so it's computed once here off the just-computed result and stored on
@@ -307,7 +320,9 @@
             equipRow("Density", fmt(r.sqftPerTon) + " ft²/ton") +
           '</div>' +
           '<div class="eq-alts">By system type: single-stage <b>' + r.sizing.single + 't</b> · two-stage <b>' + r.sizing.two + 't</b> · variable-capacity <b>' + r.sizing.variable + 't</b><span class="eq-alt-note">Variable systems modulate down to ~30–40%, so a nominal size above the load still runs efficiently. Selection follows ACCA Manual S limits (90–115%).</span></div>' +
-          '<p>' + r.equipment.suggestion + '</p></div>' +
+          '<p>' + r.equipment.suggestion + '</p>' +
+          '<p class="eq-oversize-note">Larger than this? That\'s common: published Manual J case studies and real contractor-quote comparisons repeatedly show field-installed equipment sized 20–75% above the calculated load, usually from rule-of-thumb sizing (e.g. a flat 400–600 ft²/ton) rather than a load calc. The smaller, calculated number is typically the more accurate one — oversized equipment short-cycles, dehumidifies worse, and costs more up front and to run.</p>' +
+          '</div>' +
       '</div>' +
 
       hpCard(r, c) +
@@ -487,7 +502,7 @@
     var o = state.overrides, p = state.property;
     res.findings.forEach(function (f) {
       f.status = "info";
-      if (f.field === "other" || f.field === "stories") return; // informational only
+      if (f.field === "other") return; // informational only
       if (f.confidence === "low" || f.value == null) { f.status = "low"; return; }
       var overridden = (f.field === "area" || f.field === "ceiling") ? o[f.field] != null : !!o[f.field];
       if (overridden) { f.status = "kept"; return; }               // user's manual setting wins
@@ -744,8 +759,29 @@
             '<div><label>Ceiling height (ft)</label>' +
             '<input type="number" id="inCeiling" min="7" max="20" step="0.5" value="' + e.ceiling + '" /></div>' +
           '</div>' +
+          '<div class="adjust-row">' +
+            '<div><label>Stories</label>' +
+              '<select id="inStories">' +
+                '<option value=""' + (e.stories == null ? " selected" : "") + '>Auto (estimated from floor area)</option>' +
+                opt("1", "1", e.stories != null ? String(e.stories) : "") +
+                opt("1.5", "1.5", e.stories != null ? String(e.stories) : "") +
+                opt("2", "2", e.stories != null ? String(e.stories) : "") +
+                opt("3", "3", e.stories != null ? String(e.stories) : "") +
+                opt("4", "4", e.stories != null ? String(e.stories) : "") +
+              '</select></div>' +
+            '<div><label>Window amount (% of floor area, optional)</label>' +
+              '<input type="number" id="inWindowFrac" min="5" max="40" step="1" placeholder="leave blank for 15% default" value="' + (e.windowFrac != null ? Math.round(e.windowFrac * 100) : "") + '" /></div>' +
+          '</div>' +
           '<label>Attic insulation (R-value, optional)</label>' +
           '<input type="number" id="inAtticR" min="0" max="100" step="1" placeholder="leave blank to use construction tier above" value="' + (e.atticR != null ? e.atticR : "") + '" />' +
+          '<div class="adjust-row">' +
+            '<div><label>Window U-factor (optional, NFRC label)</label>' +
+              '<input type="number" id="inWindowU" min="0.05" max="3" step="0.01" placeholder="blank = tier above" value="' + (e.windowU != null ? e.windowU : "") + '" /></div>' +
+            '<div><label>Window SHGC (optional, NFRC label)</label>' +
+              '<input type="number" id="inWindowSHGC" min="0.05" max="1" step="0.01" placeholder="blank = tier above" value="' + (e.windowSHGC != null ? e.windowSHGC : "") + '" /></div>' +
+          '</div>' +
+          '<label>Air sealing — ACH natural (optional, from a blower-door/energy audit)</label>' +
+          '<input type="number" id="inAch" min="0.05" max="3" step="0.01" placeholder="leave blank to use construction tier above" value="' + (e.ach != null ? e.ach : "") + '" />' +
           '<div class="adjust-row">' +
             '<div><label>Duct location</label>' +
               '<select id="inDuctType">' +
@@ -837,8 +873,19 @@
       state.overrides.systemType = $("#inSystem").value;
       state.overrides.ceiling = isFinite(ceiling) ? ceiling : undefined;
 
+      var storiesEl = $("#inStories"); var storiesVal = storiesEl ? parseFloat(storiesEl.value) : NaN;
+      state.overrides.stories = isFinite(storiesVal) && storiesVal > 0 ? storiesVal : undefined;
+      var winFracEl = $("#inWindowFrac"); var winFracVal = winFracEl ? parseFloat(winFracEl.value) : NaN;
+      state.overrides.windowFrac = isFinite(winFracVal) && winFracVal > 0 ? winFracVal / 100 : undefined;
+
       var atticR = parseFloat($("#inAtticR") ? $("#inAtticR").value : "");
       state.overrides.atticR = isFinite(atticR) && atticR > 0 ? atticR : undefined;
+      var windowUEl = $("#inWindowU"); var windowUVal = windowUEl ? parseFloat(windowUEl.value) : NaN;
+      state.overrides.windowU = isFinite(windowUVal) && windowUVal > 0 ? windowUVal : undefined;
+      var windowSHGCEl = $("#inWindowSHGC"); var windowSHGCVal = windowSHGCEl ? parseFloat(windowSHGCEl.value) : NaN;
+      state.overrides.windowSHGC = isFinite(windowSHGCVal) && windowSHGCVal > 0 ? windowSHGCVal : undefined;
+      var achEl = $("#inAch"); var achVal = achEl ? parseFloat(achEl.value) : NaN;
+      state.overrides.ach = isFinite(achVal) && achVal > 0 ? achVal : undefined;
       var ductTypeEl = $("#inDuctType");
       state.overrides.ductType = ductTypeEl && ductTypeEl.value ? ductTypeEl.value : undefined;
       var ductCondEl = $("#inDuctCondition");
