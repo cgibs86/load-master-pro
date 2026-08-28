@@ -46,23 +46,30 @@ the building/zoning department's website, permit portal, email, and phone. It th
 lets you open a **pre-filled professional email** to the city with a summary of the
 load report, ready to attach the generated PDF and submit.
 
-This is powered by Claude with web search, so it runs **server-side** (the API key
-never reaches the browser). It's optional — the calculator works without it.
+This is powered by your choice of AI provider's web search, so it runs
+**server-side** (the API key never reaches the browser). It's optional — the
+calculator works without it.
 
 ```bash
-npm install                      # installs @anthropic-ai/sdk (Pro feature only)
-export ANTHROPIC_API_KEY=sk-ant-...
-npm start                        # the /api/permit-search endpoint is now live
+npm install                          # installs @anthropic-ai/sdk (Anthropic provider only)
+export LMP_PERMIT_PROVIDER=anthropic # anthropic (default) | openai | gemini | perplexity
+export ANTHROPIC_API_KEY=sk-ant-...  # matching key for whichever provider you picked
+npm start                            # the /api/permit-search endpoint is now live
 ```
 
 Then run a calculation and click **Enable Pro (preview)** → **Search permit & code
-requirements**. Without the key (or the install), the calculator still runs and the
-panel reports that the feature isn't configured.
+requirements**. Without a key (or the install, for the Anthropic provider), the
+calculator still runs and the panel reports that the feature isn't configured.
 
 - Endpoint: `POST /api/permit-search` (`api/permit-search.cjs`) — also usable as a
   generic serverless handler via its exported `handler(body)`.
-- Optional env: `LMP_PERMIT_MODEL` (default `claude-opus-4-8`),
-  `LMP_PERMIT_EFFORT` (`low`|`medium`|`high`|`max`, default `medium`).
+- `LMP_PERMIT_PROVIDER`: `anthropic` (default) | `openai` | `gemini` | `perplexity`.
+  Matching API key env var: `ANTHROPIC_API_KEY` | `OPENAI_API_KEY` | `GEMINI_API_KEY` |
+  `PERPLEXITY_API_KEY`.
+- Optional env: `LMP_PERMIT_MODEL` (default per provider: `claude-opus-5` / `gpt-5.6` /
+  `gemini-3.5-flash` / `sonar-pro`), `LMP_PERMIT_EFFORT` (`low`|`medium`|`high`|`max`,
+  default `medium` — Anthropic only, the other providers' web-search tools have no
+  equivalent knob).
 
 > Permit results are **best-effort AI research** — municipal codes are
 > inconsistent and change. Always verify with the authority having jurisdiction
@@ -77,6 +84,6 @@ HTTPS static host (Netlify, Vercel, Cloudflare Pages) and **Add to Home
 Screen** on your phone. HTTPS is required for PWA install and geolocation.
 
 The **Pro permit search** needs a server. Run the Node server (`npm start`) on a
-host that holds `ANTHROPIC_API_KEY`, or deploy `api/permit-search.cjs` as a
-serverless function and point the app at it by setting `window.LMP_API_BASE` to
-its URL.
+host that holds the active provider's API key, or deploy `api/permit-search.cjs`
+as a serverless function and point the app at it by setting `window.LMP_API_BASE`
+to its URL.

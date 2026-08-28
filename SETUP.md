@@ -70,14 +70,22 @@ photos told us" card (and a matching section in the PDF report) lists every find
 confidence, and whether it changed the numbers. Photos are always optional; without them
 (or without a key) the calculator behaves exactly as before.
 
-1. Get an API key at [platform.claude.com](https://platform.claude.com/) (Anthropic).
-2. In the app: **Settings → AI photo analysis** → paste the key. It's stored on-device
-   only, like the RentCast key.
+1. Pick a provider in the app: **Settings → AI photo analysis** — Anthropic (Claude),
+   OpenAI (ChatGPT), Google (Gemini), Perplexity, or a custom OpenAI-compatible
+   endpoint (a local model server, a proxy, another vendor). Get a key from that
+   provider: [platform.claude.com](https://platform.claude.com/) (Anthropic),
+   [platform.openai.com/api-keys](https://platform.openai.com/api-keys) (OpenAI),
+   [aistudio.google.com/apikey](https://aistudio.google.com/apikey) (Gemini),
+   [perplexity.ai/settings/api](https://www.perplexity.ai/settings/api) (Perplexity).
+2. Paste the key into Settings. It's stored on-device only, like the RentCast key.
+   A "Model override" field lets you pin a specific model instead of the provider's
+   current default; the "custom" provider requires a base URL instead of a signup link.
 3. On any result with photos attached, tap **Analyze photos with AI**.
 
 Notes:
-- Analysis uses the Claude vision model (`claude-opus-4-8`); a 6-photo analysis costs a
-  few cents. Photos are sent to Anthropic only when the user taps Analyze.
+- Analysis uses the selected provider's vision model; a 6-photo analysis typically
+  costs a few cents regardless of provider. Photos are sent to that provider only
+  when the user taps Analyze.
 - Only high/medium-confidence findings are applied. A user's manual fine-tune settings
   always win, and a photo-based size guess never overrides real property-record data.
 - **Honest limitation:** as with the RentCast key, a key pasted into a browser app lives

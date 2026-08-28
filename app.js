@@ -18,9 +18,24 @@
   };
 
   // ---------- Settings (stored on-device only) ----------
+  // One-time migration: the AI key used to be Anthropic-only (s.anthropicApiKey).
+  // Fold it into the new provider-agnostic shape so nobody's saved key vanishes.
+  function migrateAiSettings(s) {
+    if (s.anthropicApiKey && !s.aiApiKey) {
+      s.aiProvider = "anthropic";
+      s.aiApiKey = s.anthropicApiKey;
+      delete s.anthropicApiKey;
+    }
+    return s;
+  }
   function loadSettings() {
-    try { return JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; }
-    catch (e) { return {}; }
+    try {
+      var raw = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {};
+      var hadOldKey = !!raw.anthropicApiKey;
+      var s = migrateAiSettings(raw);
+      if (hadOldKey) saveSettings(s); // persist the migration immediately, not just in-memory
+      return s;
+    } catch (e) { return {}; }
   }
   function saveSettings(s) { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); }
 
@@ -354,7 +369,7 @@
       aiBlock = state.photoBusy
         ? '<button class="action-btn primary ai-btn" disabled><span class="spin"></span>Reading photos…</button>'
         : '<button class="action-btn primary ai-btn" id="aiAnalyzeBtn">' + sparkIcon() + (state.photoAI ? 'Re-analyze photos with AI' : 'Analyze photos with AI') + '</button>' +
-          '<p class="ai-note">Optional. AI reads sun exposure, windows, insulation and size from your shots and tunes the load numbers. Uses your Anthropic API key (Settings).</p>';
+          '<p class="ai-note">Optional. AI reads sun exposure, windows, insulation and size from your shots and tunes the load numbers. Uses your AI provider key (Settings).</p>';
     }
     return '' +
       '<div class="photos-card">' +
@@ -429,8 +444,8 @@
 
   function runPhotoAnalysis() {
     var s = loadSettings();
-    if (!s.anthropicApiKey) {
-      toast("Add your Anthropic API key in Settings to enable photo analysis");
+    if (!s.aiApiKey) {
+      toast("Add an AI provider API key in Settings to enable photo analysis");
       openSettings();
       return;
     }
@@ -450,7 +465,7 @@
       bedrooms: e.bedrooms,
       yearBuilt: p.yearBuilt
     };
-    window.PhotoAI.analyze(state.photos.map(function (ph) { return ph.src; }), ctx, s.anthropicApiKey)
+    window.PhotoAI.analyze(state.photos.map(function (ph) { return ph.src; }), ctx, s)
       .then(applyPhotoInsights)
       .catch(function (err) {
         state.photoBusy = false;
@@ -1238,10 +1253,29 @@
 
   // ---------- Settings sheet ----------
   var pendingLogo = null;
+  // ---------- AI provider Settings helpers ----------
+  function aiProviderOptions(selected) {
+    return window.AIProviders.listProviders().map(function (p) {
+      return '<option value="' + p.id + '"' + (p.id === selected ? " selected" : "") + '>' + escapeAttr(p.label) + '</option>';
+    }).join("");
+  }
+  function aiProviderCopy(id) {
+    var p = window.AIProviders.getProvider(id);
+    var link = p.signupUrl ? '<a class="link" href="' + p.signupUrl + '" target="_blank" rel="noopener">' + escapeAttr(p.label) + '</a>' : escapeAttr(p.label);
+    if (id === "custom") {
+      return 'Point the app at any OpenAI-compatible endpoint (a local model server, a proxy, another vendor) — the app can still read your site photos and tune the load calculation. Photos are sent to your endpoint only when you tap "Analyze".';
+    }
+    return 'Add a ' + link + ' key and the app can read your site photos — sun exposure, windows, insulation, ceiling height, home size — and tune the load calculation automatically. Photos are sent to ' + escapeAttr(p.label) + ' only when you tap "Analyze".';
+  }
+  function aiKeyLabel(id) { return window.AIProviders.getProvider(id).keyLabel; }
+  function aiKeyPlaceholder(id) { return window.AIProviders.getProvider(id).keyPlaceholder; }
+  function currentProviderDefaultModel(id) { return window.AIProviders.getProvider(id).defaultModel; }
+
   function openSettings() {
     var s = loadSettings();
     var hasKey = !!s.propertyApiKey;
-    var hasAiKey = !!s.anthropicApiKey;
+    var hasAiKey = !!s.aiApiKey;
+    var aiProvider = s.aiProvider || "anthropic";
     pendingLogo = null;
     $("#settingsRoot").innerHTML =
       '<div class="overlay" id="overlay"><div class="sheet">' +
@@ -1272,10 +1306,16 @@
         '</div>' +
 
         '<div class="set-group"><div class="set-title">AI photo analysis</div>' +
-        '<p class="sub">Add an <a class="link" href="https://platform.claude.com/" target="_blank" rel="noopener">Anthropic API</a> key and the app can read your site photos — sun exposure, windows, insulation, ceiling height, home size — and tune the load calculation automatically. Photos are sent to Anthropic only when you tap “Analyze”.</p>' +
-        '<label>Anthropic API key</label>' +
-        '<input type="password" id="aiKey" placeholder="' + (hasAiKey ? "•••••• saved" : "sk-ant-… (optional)") + '" />' +
-        '<div class="status">' + (hasAiKey ? "✓ A key is saved on this device — it never leaves it except to call the API directly." : "No key set — photo analysis stays off; everything else works normally.") + '</div>' +
+        '<p class="sub" id="aiProviderSub">' + aiProviderCopy(aiProvider) + '</p>' +
+        '<label>AI provider</label>' +
+        '<select id="aiProvider">' + aiProviderOptions(aiProvider) + '</select>' +
+        '<label id="aiKeyLabel">' + aiKeyLabel(aiProvider) + '</label>' +
+        '<input type="password" id="aiKey" placeholder="' + (hasAiKey ? "•••••• saved" : aiKeyPlaceholder(aiProvider) + " (optional)") + '" />' +
+        '<div class="set-two">' +
+          '<div><label>Model override</label><input type="text" id="aiModel" value="' + escapeAttr(s.aiModel || "") + '" placeholder="' + escapeAttr(currentProviderDefaultModel(aiProvider) || "required") + '" /></div>' +
+          '<div id="aiBaseUrlWrap" style="' + (aiProvider === "custom" ? "" : "display:none") + '"><label>Base URL</label><input type="text" id="aiBaseUrl" value="' + escapeAttr(s.aiBaseUrl || "") + '" placeholder="https://your-endpoint/v1/chat/completions" /></div>' +
+        '</div>' +
+        '<div class="status">' + (hasAiKey ? "✓ A key is saved on this device — it never leaves it except to call the provider's API directly." : "No key set — photo analysis stays off; everything else works normally.") + '</div>' +
         '</div>' +
 
         '<button class="save" id="saveSettings">Save settings</button>' +
@@ -1301,6 +1341,15 @@
     var lr = $("#logoRemove");
     if (lr) lr.addEventListener("click", function () { pendingLogo = "REMOVE"; $("#logoPrev").innerHTML = '<span>Logo</span>'; });
 
+    $("#aiProvider").addEventListener("change", function () {
+      var id = $("#aiProvider").value;
+      $("#aiProviderSub").innerHTML = aiProviderCopy(id);
+      $("#aiKeyLabel").textContent = aiKeyLabel(id);
+      $("#aiKey").placeholder = aiKeyPlaceholder(id) + " (optional)";
+      $("#aiModel").placeholder = currentProviderDefaultModel(id) || "required";
+      $("#aiBaseUrlWrap").style.display = (id === "custom") ? "" : "none";
+    });
+
     $("#saveSettings").addEventListener("click", function () {
       var cur = loadSettings();
       cur.company = $("#setCompany").value.trim();
@@ -1309,8 +1358,17 @@
       cur.email = $("#setEmail").value.trim();
       var v = $("#apiKey").value.trim();
       if (v) cur.propertyApiKey = v; // empty keeps existing key
+      cur.aiProvider = $("#aiProvider").value;
       var ak = $("#aiKey").value.trim();
-      if (ak) cur.anthropicApiKey = ak; // empty keeps existing key
+      if (ak) cur.aiApiKey = ak; // empty keeps existing key
+      var am = $("#aiModel").value.trim();
+      if (am) cur.aiModel = am; else delete cur.aiModel; // blank = fall back to the provider's current default
+      if (cur.aiProvider === "custom") {
+        var abu = $("#aiBaseUrl").value.trim();
+        if (abu) cur.aiBaseUrl = abu;
+      } else {
+        delete cur.aiBaseUrl; // a stale custom URL shouldn't linger once switched away
+      }
       if (pendingLogo === "REMOVE") delete cur.logo;
       else if (pendingLogo) cur.logo = pendingLogo;
       saveSettings(cur);

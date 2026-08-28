@@ -1,5 +1,5 @@
 /* LoadMaster Pro AI — offline service worker */
-var CACHE = "loadmasterproai-v11";
+var CACHE = "loadmasterproai-v12";
 var ASSETS = [
   "./",
   "./index.html",
@@ -9,6 +9,7 @@ var ASSETS = [
   "./styles.css",
   "./app.js",
   "./loadcalc.js",
+  "./ai-providers.js",
   "./photo-ai.js",
   "./climate-data.js",
   "./permits-data.js",
@@ -38,7 +39,15 @@ self.addEventListener("fetch", function (e) {
   var url = new URL(req.url);
 
   // Network-first for live API calls (geocoding / climate / property / AI); never cache those.
-  if (url.hostname.indexOf("nominatim") !== -1 || url.hostname.indexOf("rentcast") !== -1 || url.hostname.indexOf("open-meteo") !== -1 || url.hostname.indexOf("anthropic") !== -1) {
+  // Note: every AI provider call the app makes is a POST, and this handler
+  // already returns above (line 37) for anything but GET, and only ever
+  // writes to cache for same-origin requests (see the origin check below) —
+  // so this hostname list isn't load-bearing for AI calls (including a
+  // user-supplied "custom" endpoint, whatever its hostname is). It's kept as
+  // documentation of intent / a safety net for any future GET-based AI call.
+  if (url.hostname.indexOf("nominatim") !== -1 || url.hostname.indexOf("rentcast") !== -1 || url.hostname.indexOf("open-meteo") !== -1 ||
+      url.hostname.indexOf("anthropic") !== -1 || url.hostname.indexOf("openai") !== -1 ||
+      url.hostname.indexOf("googleapis") !== -1 || url.hostname.indexOf("perplexity") !== -1) {
     e.respondWith(fetch(req).catch(function () { return new Response("{}", { headers: { "Content-Type": "application/json" } }); }));
     return;
   }

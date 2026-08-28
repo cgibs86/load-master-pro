@@ -5,7 +5,8 @@
   "description": "LoadMaster Pro AI — load calcs, mastered by AI: address-based Manual J–style load calculator PWA",
   "scripts": {
     "start": "node serve.cjs",
-    "dev": "node serve.cjs"
+    "dev": "node serve.cjs",
+    "test": "node tests/manual-j-benchmarks.js && node tests/ai-providers.test.js && node tests/permit-search.test.js"
   },
   "engines": {
     "node": ">=18"

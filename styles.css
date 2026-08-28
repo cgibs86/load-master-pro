@@ -245,11 +245,11 @@ body.has-results .search-card { margin-top: 6px; }
 /* ---------- Inline editor / sheet ---------- */
 .adjust { margin-top: 14px; }
 .adjust label { display: block; font-size: 12px; color: var(--muted); font-weight: 600; margin: 12px 2px 7px; }
-.adjust input[type=number], .adjust select {
+.adjust input[type=number], .adjust select, .sheet select {
   width: 100%; padding: 12px 13px; font-size: 15px; color: var(--text);
   background: rgba(0, 0, 0, 0.28); border: 1px solid var(--border); border-radius: var(--radius-sm); outline: none;
 }
-.adjust input:focus, .adjust select:focus { border-color: rgba(110, 168, 255, 0.6); }
+.adjust input:focus, .adjust select:focus, .sheet select:focus { border-color: rgba(110, 168, 255, 0.6); }
 .seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .seg button {
   padding: 11px 6px; border-radius: 12px; font-size: 13px; font-weight: 600; cursor: pointer;
@@ -491,7 +491,7 @@ footer .disc { display: block; margin-top: 6px; }
 
 /* ---------- Adjust extras ---------- */
 .adjust-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.adjust select {
+.adjust select, .sheet select {
   -webkit-appearance: none; appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2397a3c0' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat; background-position: right 13px center; padding-right: 34px;

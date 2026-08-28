@@ -56,3 +56,23 @@ whoever picks up this app next.
 6. **Multi-zone / multi-system support for larger homes.** Another genuine
    Fleet-tier differentiator — today Fleet has no unique capability beyond
    seats and ops perks, the same gap noted in item 4.
+
+7. **Shovels API as an optional bring-your-own-key data source (evaluated,
+   not integrated).** Shovels (shovels.ai) provides permit, property, and
+   contractor records across 2,750+ US jurisdictions. Checked its actual
+   schema: property records have `year_built`/`lot_size`/`story_count`/
+   `building_area` but no bedroom count (RentCast, already integrated,
+   covers that), and permit records prove *that* HVAC work happened and
+   roughly *who/when* via an "hvac" contractor-classification tag — but
+   **no tonnage, SEER rating, duct specs, or any equipment-level data at
+   all**. It would not help auto-fill attic-R/duct-type/return-air inputs;
+   photo-based detection (item 3) remains the right path for that. Where it
+   *would* help: real permit history for the report/PermitIQ ("last
+   permitted HVAC work: 2019, contractor X") — a genuine upgrade over
+   PermitIQ's current static code-minimums lookup. Not worth bundling by
+   default: pricing is sales-gated, not self-serve, with publicly reported
+   entry pricing around $599/month — far outside a bundled-by-default cost
+   model for a product priced at $19–129/mo, unlike RentCast's accessible
+   self-serve tier. Worth revisiting as an optional user-supplied-key
+   integration (same pattern as the RentCast/AI provider keys) for shops
+   that already pay for Shovels for their own business-development use.

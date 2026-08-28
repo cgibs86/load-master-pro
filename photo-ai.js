@@ -1,25 +1,23 @@
 /*
  * LoadMaster Pro AI — AI photo analysis (PhotoScan).
  *
- * Sends the job-site photos to the Claude vision API and returns structured
- * observations about the home (sun exposure, insulation quality, windows,
- * foundation, ceiling height, size) that the calculator can fold into the
- * load numbers. Entirely optional: no photos or no API key means the
- * calculator behaves exactly as before.
+ * Sends the job-site photos to the user's chosen AI provider's vision API and
+ * returns structured observations about the home (sun exposure, insulation
+ * quality, windows, foundation, ceiling height, size) that the calculator can
+ * fold into the load numbers. Entirely optional: no photos or no API key
+ * means the calculator behaves exactly as before.
  *
- * The app is a buildless static site, so this calls the Messages API with
- * fetch() directly (CORS is enabled via the
- * anthropic-dangerous-direct-browser-access header). The user's own API key
- * is stored on-device in Settings, same as the property-data key.
+ * Transport (which provider, which HTTP shape) lives in ai-providers.js — this
+ * file only owns the prompt, the output schema, and validating/sanitizing
+ * whatever comes back, so none of that has to be duplicated per provider.
+ * The user's own API key is stored on-device in Settings, same as the
+ * property-data key.
  */
 (function (root) {
   "use strict";
 
-  var API_URL = "https://api.anthropic.com/v1/messages";
-  var MODEL = "claude-opus-4-8";
-
-  // Structured-output schema: the API guarantees the response is valid JSON
-  // matching this shape, so no free-text parsing is needed.
+  // Structured-output schema: every provider is asked to return JSON matching
+  // this shape, so no free-text parsing is needed.
   var SCHEMA = {
     type: "object",
     additionalProperties: false,
@@ -48,12 +46,6 @@
       }
     }
   };
-
-  function imageBlock(dataUrl) {
-    var m = /^data:(image\/[a-z0-9+.-]+);base64,(.+)$/i.exec(dataUrl);
-    if (!m) return null;
-    return { type: "image", source: { type: "base64", media_type: m[1].toLowerCase(), data: m[2] } };
-  }
 
   function buildPrompt(ctx) {
     var areaSource = ctx.areaSource === "fetched"
@@ -114,51 +106,28 @@
   }
 
   /*
-   * analyze(dataUrls, ctx, apiKey) -> Promise<{summary, findings[]}>
+   * analyze(dataUrls, ctx, settings) -> Promise<{summary, findings[]}>
    * dataUrls: array of base64 image data URLs (already downscaled by the app).
    * ctx: current calculation context (address, area, areaSource, quality, …).
+   * settings: the app's Settings object — aiProvider/aiApiKey/aiModel/aiBaseUrl.
    */
-  function analyze(dataUrls, ctx, apiKey) {
-    var content = [];
-    (dataUrls || []).slice(0, 6).forEach(function (u) {
-      var b = imageBlock(u);
-      if (b) content.push(b);
-    });
-    if (!content.length) return Promise.reject(new Error("No readable photos to analyze."));
-    content.push({ type: "text", text: buildPrompt(ctx || {}) });
-
-    return fetch(API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true"
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 4096,
-        output_config: { format: { type: "json_schema", schema: SCHEMA } },
-        messages: [{ role: "user", content: content }]
-      })
-    }).then(function (r) {
-      if (r.status === 401) throw new Error("That API key was rejected — check it in Settings.");
-      if (r.status === 429) throw new Error("Rate limited — wait a minute and try again.");
-      if (!r.ok) {
-        return r.json().catch(function () { return {}; }).then(function (body) {
-          throw new Error((body.error && body.error.message) || ("API error " + r.status));
-        });
-      }
-      return r.json();
-    }).then(function (msg) {
-      if (msg.stop_reason === "refusal") throw new Error("The AI declined to analyze these photos.");
-      if (msg.stop_reason === "max_tokens") throw new Error("Analysis was cut short — try fewer photos.");
-      var text = null;
-      (msg.content || []).forEach(function (block) { if (block.type === "text" && text == null) text = block.text; });
-      if (!text) throw new Error("The AI returned no analysis.");
-      return sanitize(JSON.parse(text));
-    });
+  function analyze(dataUrls, ctx, settings) {
+    var images = (dataUrls || []).slice(0, 6);
+    if (!images.length) return Promise.reject(new Error("No readable photos to analyze."));
+    settings = settings || {};
+    var providerId = settings.aiProvider || "anthropic";
+    var provider = root.AIProviders.getProvider(providerId);
+    return root.AIProviders.analyzeImages({
+      providerId: providerId,
+      apiKey: settings.aiApiKey,
+      model: settings.aiModel || provider.defaultModel,
+      baseUrl: settings.aiBaseUrl,
+      images: images,
+      schema: SCHEMA,
+      promptText: buildPrompt(ctx || {}),
+      maxTokens: 4096
+    }).then(sanitize);
   }
 
-  root.PhotoAI = { analyze: analyze, MODEL: MODEL };
+  root.PhotoAI = { analyze: analyze };
 })(typeof window !== "undefined" ? window : globalThis);
