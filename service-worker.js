@@ -46,6 +46,7 @@ self.addEventListener("fetch", function (e) {
   // user-supplied "custom" endpoint, whatever its hostname is). It's kept as
   // documentation of intent / a safety net for any future GET-based AI call.
   if (url.hostname.indexOf("nominatim") !== -1 || url.hostname.indexOf("rentcast") !== -1 || url.hostname.indexOf("open-meteo") !== -1 ||
+      url.hostname.indexOf("nationalmap.gov") !== -1 ||
       url.hostname.indexOf("anthropic") !== -1 || url.hostname.indexOf("openai") !== -1 ||
       url.hostname.indexOf("googleapis") !== -1 || url.hostname.indexOf("perplexity") !== -1) {
     e.respondWith(fetch(req).catch(function () { return new Response("{}", { headers: { "Content-Type": "application/json" } }); }));

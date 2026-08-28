@@ -56,6 +56,32 @@
     return { heating99: heating99, cooling1: cooling1, outGrains: outGrains, elevFt: elevFt, hours: t.length };
   }
 
+  // US Geological Survey Elevation Point Query Service: free, no key, no
+  // rate limit disclosed, interpolated from 1/3 arc-second (~10m) or better
+  // LiDAR-derived DEMs where available -- materially more accurate for US
+  // addresses than Open-Meteo's global 90m Copernicus DEM (the elevation
+  // feeding air-density correction only needs to be right to within a
+  // percent or two of standard pressure ratio, but "more accurate for free"
+  // is a plain win). Best-effort only: any failure, timeout, or an
+  // out-of-coverage sentinel (non-US points return a large negative value)
+  // means the caller keeps Open-Meteo's elevation instead.
+  function fetchElevationUSGS(lat, lon, fetchImpl) {
+    var f = fetchImpl || (typeof fetch !== "undefined" ? fetch : null);
+    if (!f) return Promise.resolve(null);
+    var url = "https://epqs.nationalmap.gov/v1/json?x=" + lon + "&y=" + lat + "&units=Feet&wkid=4326&includeDate=false";
+    var ctrl = (typeof AbortController !== "undefined") ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, 6000) : null;
+    return f(url, ctrl ? { signal: ctrl.signal } : undefined)
+      .then(function (r) { if (!r.ok) throw new Error("usgs http " + r.status); return r.json(); })
+      .then(function (data) {
+        if (timer) clearTimeout(timer);
+        var ft = data && typeof data.value === "number" ? data.value : parseFloat(data && data.value);
+        if (!isFinite(ft) || ft < -1000 || ft > 20000) return null;      // out-of-coverage sentinel / bad data
+        return Math.round(ft);
+      })
+      .catch(function () { if (timer) clearTimeout(timer); return null; });
+  }
+
   // Fetch the last full year of hourly temperature + dew point for a location.
   // Returns a promise of analyze() output, or null on any failure (caller
   // falls back to the station table). fetchImpl is injectable for tests.
@@ -72,17 +98,29 @@
     var ctrl = (typeof AbortController !== "undefined") ? new AbortController() : null;
     var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, 9000) : null;
 
+    // Kick off the USGS elevation cross-check in parallel -- it never blocks
+    // or fails the climate fetch, it can only refine the elevFt it returns.
+    var usgsPromise = fetchElevationUSGS(lat, lon, fetchImpl);
+
     return f(url, ctrl ? { signal: ctrl.signal } : undefined)
       .then(function (r) { if (!r.ok) throw new Error("climate http " + r.status); return r.json(); })
       .then(function (data) {
         if (timer) clearTimeout(timer);
         if (!data || !data.hourly) return null;
-        return analyze(data.hourly.temperature_2m || [], data.hourly.dew_point_2m || [], data.elevation || 0);
+        var result = analyze(data.hourly.temperature_2m || [], data.hourly.dew_point_2m || [], data.elevation || 0);
+        if (!result) return result;
+        return usgsPromise.then(function (usgsFt) {
+          if (usgsFt != null) result.elevFt = usgsFt;
+          return result;
+        });
       })
       .catch(function () { if (timer) clearTimeout(timer); return null; });
   }
 
-  var api = { percentile: percentile, median: median, grainsFromDewpoint: grainsFromDewpoint, analyze: analyze, fetchLive: fetchLive };
+  var api = {
+    percentile: percentile, median: median, grainsFromDewpoint: grainsFromDewpoint, analyze: analyze,
+    fetchElevationUSGS: fetchElevationUSGS, fetchLive: fetchLive
+  };
   root.ClimateEngine = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);
