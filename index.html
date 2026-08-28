@@ -75,7 +75,7 @@
   </header>
 
   <!-- ================= STATS ================= -->
-  <div class="wrap stats">
+  <div class="wrap stats reveal">
     <div class="stat"><b class="grad">&lt; 60 sec</b><span>from address to full load calc</span></div>
     <div class="stat"><b class="grad">4 photos</b><span>is all the AI needs to refine a load</span></div>
     <div class="stat"><b class="grad">8,760 hrs</b><span>of real weather behind every number</span></div>
@@ -89,7 +89,7 @@
       <h2>Every guess costs you a job,<br>a go-back — or a lawyer</h2>
       <p>Rules of thumb lose sales, roll free trucks, and leave you exposed. LoadMaster Pro AI turns every estimate into a documented, defensible, closeable number.</p>
     </div>
-    <div class="paingrid">
+    <div class="paingrid reveal">
       <div class="pain">
         <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg></div>
         <h3>Close on the first visit</h3>
@@ -137,7 +137,7 @@
       <p>This isn't a lookup table in a trench coat. LoadMaster Pro AI runs real analysis on every single address.</p>
     </div>
 
-    <div class="feat">
+    <div class="feat reveal">
       <div>
         <h3>PhotoScan <span class="grad">AI</span> <span class="new-pill">New</span></h3>
         <p><b>Take pictures. Get a tighter number.</b> Your advisor snaps a few phone photos of the home — walls, windows, attic, the old equipment — and LoadMaster's built-in AI vision reads the building like a seasoned estimator: insulation era, sun exposure, foundation type, ceiling height, glazing. Then it refines the load calculation on the spot, in front of the customer.</p>
@@ -157,7 +157,7 @@
       </div>
     </div>
 
-    <div class="feat rev">
+    <div class="feat rev reveal">
       <div>
         <h3>TrueClimate<span class="grad">™</span> engine</h3>
         <p>Type an address and LoadMaster pulls a full year of hourly weather history — about 8,760 hours — for those exact coordinates, then derives the true 99% winter and 1% summer design temperatures, coincident humidity, and site elevation.</p>
@@ -176,7 +176,7 @@
       </div>
     </div>
 
-    <div class="feat">
+    <div class="feat reveal">
       <div>
         <h3>Heat Pump <span class="grad">Balance Point Analyzer</span></h3>
         <p>The heat-pump conversation is where jobs are won right now. LoadMaster charts the home's load line against the heat pump's capacity curve and tells your customer exactly where backup heat kicks in — and how much.</p>
@@ -195,7 +195,7 @@
       </div>
     </div>
 
-    <div class="feat rev">
+    <div class="feat rev reveal">
       <div>
         <h3>PermitIQ<span class="grad">™</span> — know the city's rules<br>before you quote <span class="pro-pill">Pro &amp; Fleet</span></h3>
         <p>The #1 source of installer mistakes isn't the equipment — it's the jurisdiction. PermitIQ compiles the home's applicable requirements the moment the load calc runs: minimum SEER2/HSPF2 for that state, outdoor-unit setbacks and clearances, electrical and condensate rules, duct-testing triggers, and exactly what the permit application must include.</p>
@@ -215,7 +215,7 @@
       </div>
     </div>
 
-    <div class="feat">
+    <div class="feat reveal">
       <div>
         <h3>Branded reports <span class="grad">that close</span></h3>
         <p>One tap generates a clean, one-page PDF with your company name, logo, and license — load ranges, design conditions, equipment plan, and the cooling breakdown. Email it before you leave the driveway.</p>
@@ -237,7 +237,7 @@
 
   <!-- ================= OWN AI BAND ================= -->
   <div class="wrap">
-    <div class="ai-band" id="ai">
+    <div class="ai-band reveal" id="ai">
       <div class="sec-head" style="margin-bottom:0">
         <span class="eyebrow">✨ Not a plug-in. Not a wrapper.</span>
         <h2>This app doesn't <i>use</i> AI.<br><span class="grad">It is AI.</span></h2>
@@ -258,7 +258,7 @@
       <span class="eyebrow">How it works</span>
       <h2>Four taps in the driveway</h2>
     </div>
-    <div class="steps steps-4">
+    <div class="steps steps-4 reveal">
       <div class="step"><h3>Type the address</h3><p>Autocomplete finds the home. TrueClimate analyzes a year of weather at those coordinates; property data fills in the square footage.</p></div>
       <div class="step"><h3>Snap a few photos</h3><p>Walls, windows, attic, old equipment. PhotoScan AI reads the construction and refines the load — and the homeowner watches it happen.</p></div>
       <div class="step"><h3>Review loads &amp; rules</h3><p>Heating and cooling BTU/h with confidence ranges, tonnage, the heat-pump balance point, and the city's permit requirements.</p></div>
@@ -273,7 +273,7 @@
       <h2>Pays for itself on<br>the first saved go-back</h2>
       <p>Every plan starts with a 14-day free trial. Cancel anytime.</p>
     </div>
-    <div class="plans">
+    <div class="plans reveal">
       <div class="plan">
         <h3>Solo</h3>
         <div class="for">Owner-operators &amp; one-truck shops</div>
@@ -331,7 +331,7 @@
 
   <!-- ================= FINALE ================= -->
   <div class="wrap">
-    <div class="finale">
+    <div class="finale reveal">
       <h2>Put your own AI<br><span class="grad">on every truck</span></h2>
       <p>Your competitors are still guessing. Give every advisor in your fleet an AI estimator that sees the house, runs the numbers, and knows the rules. Free for 14 days — long enough to win a few jobs with it.</p>
       <a class="btn btn-primary" href="auth.html#signup">Start your free trial</a>
@@ -363,6 +363,23 @@
       var url = links[a.getAttribute("data-plan")];
       if (url) { a.href = url; a.textContent = "Subscribe — 14 days free"; }
     });
+  })();
+  // Scroll-reveal: fade/rise .reveal sections into view once, first paint
+  // included (so content already on screen at load doesn't sit invisible).
+  // No-ops gracefully without IntersectionObserver or under reduced motion.
+  (function () {
+    var els = document.querySelectorAll(".reveal");
+    if (!els.length) return;
+    if (!("IntersectionObserver" in window) || (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches)) {
+      els.forEach(function (el) { el.classList.add("in"); });
+      return;
+    }
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) { entry.target.classList.add("in"); io.unobserve(entry.target); }
+      });
+    }, { threshold: 0.12, rootMargin: "0px 0px -40px 0px" });
+    els.forEach(function (el) { io.observe(el); });
   })();
   </script>
 </body>
