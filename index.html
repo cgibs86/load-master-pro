@@ -8,6 +8,7 @@
   <title>LoadMaster Pro AI — Stop guessing. Start closing.</title>
   <link rel="icon" type="image/svg+xml" href="icons/icon.svg" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <link rel="manifest" href="manifest.webmanifest" />
   <link rel="stylesheet" href="landing.css" />
 </head>
 <body>
@@ -202,7 +203,7 @@
         <ul>
           <li><b>No more wrong-system sales</b> — your advisor sees the legal efficiency floor before writing the quote</li>
           <li><b>No more placement do-overs</b> — property-line setbacks and clearances up front, with "verify locally" flags where cities amend</li>
-          <li><b>Permit-ready package</b> — one tap bundles the load report, site photos, and requirements checklist into a PDF, with an email draft addressed to the permit office</li>
+          <li><b>Permit-ready package</b> — one tap bundles the load report, site photos, and requirements checklist into a PDF, with a pre-written email draft ready to send to the permit office</li>
         </ul>
       </div>
       <div class="feat-vis">
@@ -211,7 +212,7 @@
         <div class="vis-row"><span>Side-lot setback</span><b>2–5 ft · verify locally</b></div>
         <div class="vis-row"><span>Disconnect + GFCI outlet</span><b>NEC 210.63 ✓</b></div>
         <div class="vis-row"><span>Permit package</span><b>Report + photos + checklist</b></div>
-        <div class="vis-cap" style="text-align:center">Compiled per address · emailed to the permit dept.</div>
+        <div class="vis-cap" style="text-align:center">Compiled per address · ready to email to the permit dept.</div>
       </div>
     </div>
 
@@ -302,7 +303,7 @@
           <li><b>Everything in Solo</b></li>
           <li><b>PhotoScan AI</b>: snap photos, watch the AI refine every load calc in front of the customer</li>
           <li><b>PermitIQ™</b>: city permit requirements, SEER2 minimums, setbacks &amp; code checklist per address</li>
-          <li>Permit-ready package: report + site photos, emailed to the permit office</li>
+          <li>Permit-ready package: report + site photos, with a pre-written email ready for the permit office</li>
           <li>Branded PDF reports, unlimited</li>
           <li>White-label: your logo, license &amp; colors</li>
           <li>Automatic property-data lookups</li>
@@ -381,6 +382,11 @@
     }, { threshold: 0.12, rootMargin: "0px 0px -40px 0px" });
     els.forEach(function (el) { io.observe(el); });
   })();
+  // Register the same service worker app.html uses, so the "installs like
+  // an app" claim holds for whichever page a visitor lands on first.
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", function () { navigator.serviceWorker.register("service-worker.js").catch(function () {}); });
+  }
   </script>
 </body>
 </html>

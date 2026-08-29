@@ -279,6 +279,7 @@ body.has-results .search-card { margin-top: 6px; }
 .sheet .link { color: var(--accent); text-decoration: none; }
 .sheet .close { width: 100%; margin-top: 10px; padding: 12px; background: transparent; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--muted); font-weight: 600; cursor: pointer; }
 .sheet .status { margin-top: 14px; font-size: 12.5px; padding: 10px 12px; border-radius: 12px; background: var(--card); border: 1px solid var(--border); color: var(--muted); }
+.sheet .status.warn { background: rgba(255, 176, 32, 0.1); border-color: rgba(255, 176, 32, 0.3); color: #ffd591; }
 
 footer { text-align: center; margin-top: 30px; font-size: 11.5px; color: var(--muted-2); line-height: 1.6; padding: 0 10px; }
 footer .disc { display: block; margin-top: 6px; }
@@ -605,6 +606,10 @@ footer .disc { display: block; margin-top: 6px; }
 .rp-photo { border: 1px solid #e2e7f0; border-radius: 10px; overflow: hidden; }
 .rp-photo img { width: 100%; height: 120px; object-fit: cover; display: block; }
 .rp-photo span { display: block; font-size: 10px; color: #5b6680; padding: 5px 8px; }
+.rp-final-rec { background: #f3f7ff; border: 1px solid #cfe0ff; border-radius: 12px; padding: 14px 16px 16px; }
+.rp-final-rec h2 { color: #2f6fe0; border-bottom-color: #cfe0ff; }
+.rp-final-rec table td { font-size: 13.5px; }
+.rp-final-rec table td:last-child { font-size: 16px; color: #1a3d8f; }
 .rp-permit-sub { font-size: 11.5px; color: #5b6680; line-height: 1.55; margin: 4px 0 10px; }
 .rp-permit-note { font-size: 11px; color: #8a5a12; background: #fff7e8; border: 1px solid #f3e0b8; border-radius: 8px; padding: 8px 10px; margin-top: 10px; }
 .rp-list { margin: 4px 0 0; padding-left: 18px; }

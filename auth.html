@@ -124,7 +124,7 @@
         hash(pw, email).then(function (h) {
           users[email] = { name: name, company: $("#fCompany").value.trim(), pw: h, plan: paidPlan || "trial", created: Date.now() };
           saveUsers(users);
-          localStorage.setItem(SESSION_KEY, JSON.stringify({ email: email, name: name, company: users[email].company, plan: paidPlan || "trial" }));
+          localStorage.setItem(SESSION_KEY, JSON.stringify({ email: email, name: name, company: users[email].company, plan: paidPlan || "trial", created: users[email].created }));
           // Seed the report branding from the signup company name.
           try {
             var s = JSON.parse(localStorage.getItem("lmp_settings_v1")) || {};
@@ -137,7 +137,7 @@
         if (!u) { err("No account found for that email on this device. Sign up to create one."); return; }
         hash(pw, email).then(function (h) {
           if (h !== u.pw) { err("Incorrect password."); return; }
-          localStorage.setItem(SESSION_KEY, JSON.stringify({ email: email, name: u.name, company: u.company, plan: u.plan || "trial" }));
+          localStorage.setItem(SESSION_KEY, JSON.stringify({ email: email, name: u.name, company: u.company, plan: u.plan || "trial", created: u.created }));
           location.href = "app.html";
         });
       }

@@ -196,8 +196,13 @@
     if (opts.mode === "grille") {
       var w = opts.grilleW, h = opts.grilleH;
       if (!(w > 0) || !(h > 0)) return null;
-      var freeSqIn = w * h * GRILLE_FREE_AREA_FACTOR;
-      var sqInPerTon = tons ? freeSqIn / tons : null;
+      // RETURN_SQIN_PER_TON (144) is a NOMINAL-size field rule (see the
+      // constant comment above), so it must be checked against the raw
+      // w*h nominal opening, not against the free area after the grille's
+      // ~75% open-area factor is applied (that basis is ~115.2 sq in/ton).
+      var nominalSqIn = w * h;
+      var freeSqIn = nominalSqIn * GRILLE_FREE_AREA_FACTOR;
+      var sqInPerTon = tons ? nominalSqIn / tons : null;
       var ok2 = sqInPerTon != null ? sqInPerTon >= RETURN_SQIN_PER_TON : null;
       return {
         mode: "grille",
@@ -206,9 +211,9 @@
         sqInPerTon: sqInPerTon != null ? Math.round(sqInPerTon) : null,
         ok: ok2,
         message: ok2 == null ? "Return grille free area: ~" + Math.round(freeSqIn) + " sq in (estimated)."
-          : ok2 ? "Adequate — ~" + Math.round(freeSqIn) + " sq in of free area (" + Math.round(sqInPerTon) + " sq in/ton)."
-                : "Likely undersized — ~" + Math.round(freeSqIn) + " sq in of free area is only " + Math.round(sqInPerTon) + " sq in/ton (target: " + RETURN_SQIN_PER_TON + "). Consider a larger grille or a second return.",
-        disclosure: "Assumes a standard louvered return grille (~75% free area). Denser or decorative grille faces pass less air. Screened against the common HVAC field rule of ≥144 sq in of return opening per ton — a rule-of-thumb check, not a Manual D duct design."
+          : ok2 ? "Adequate — ~" + Math.round(nominalSqIn) + " sq in nominal size (" + Math.round(sqInPerTon) + " sq in/ton, ~" + Math.round(freeSqIn) + " sq in free area)."
+                : "Likely undersized — ~" + Math.round(nominalSqIn) + " sq in nominal size is only " + Math.round(sqInPerTon) + " sq in/ton (target: " + RETURN_SQIN_PER_TON + "). Consider a larger grille or a second return.",
+        disclosure: "Assumes a standard louvered return grille (~75% free area). Denser or decorative grille faces pass less air. Screened against the common HVAC field rule of ≥144 nominal sq in of return opening per ton — a rule-of-thumb check, not a Manual D duct design."
       };
     }
     return null;

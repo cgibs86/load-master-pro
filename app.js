@@ -40,11 +40,15 @@
   function saveSettings(s) { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); }
 
   // ---------- Geocoding (OpenStreetMap Nominatim — CORS-friendly, no key) ----------
+  function geocodeHttpErrorMessage(status) {
+    if (status === 429 || status === 503) return "Address lookup is busy — please try again in a moment.";
+    return "Address lookup failed — please try again.";
+  }
   function geocode(address) {
-    var url = "https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=1&q=" +
+    var url = "https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=1&countrycodes=us&q=" +
               encodeURIComponent(address);
     return fetch(url, { headers: { "Accept": "application/json" } })
-      .then(function (r) { if (!r.ok) throw new Error("geocode http " + r.status); return r.json(); })
+      .then(function (r) { if (!r.ok) throw new Error(geocodeHttpErrorMessage(r.status)); return r.json(); })
       .then(function (data) {
         if (!data || !data.length) throw new Error("We couldn't find that address. Try adding the city and state.");
         var m = data[0];
@@ -61,9 +65,9 @@
   }
 
   function reverseGeocode(lat, lon) {
-    var url = "https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&lat=" + lat + "&lon=" + lon;
+    var url = "https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&countrycodes=us&lat=" + lat + "&lon=" + lon;
     return fetch(url, { headers: { "Accept": "application/json" } })
-      .then(function (r) { return r.json(); })
+      .then(function (r) { if (!r.ok) throw new Error("reverse geocode http " + r.status); return r.json(); })
       .then(function (m) {
         var a = (m && m.address) || {};
         return {
@@ -172,7 +176,8 @@
         state.climate = {
           city: station.city, source: "station", hours: 0,
           heating99: station.heating99, cooling1: station.cooling1,
-          outGrains: station.outGrains, elevFt: 0
+          outGrains: station.outGrains, elevFt: station.elevFt || 0,
+          distance: station.distance
         };
       }
       return res[1];
@@ -230,9 +235,13 @@
     // undefined (both omitted) keeps exact legacy behavior in loadcalc.js.
     var windowFrac = o.windowFrac != null ? o.windowFrac : (pa.windowFrac != null ? pa.windowFrac : undefined);
     var stories = o.stories != null ? o.stories : (pa.stories != null ? pa.stories : undefined);
+    // atticR only actually affects the engine when >= 5 (loadcalc.js's own
+    // guard) — echo back the *effective* value so the UI/report never show an
+    // override that had zero effect on the numbers.
+    var atticREffective = (atticR != null && atticR >= 5) ? atticR : undefined;
     state.effective = {
       area: area, bedrooms: bedrooms, quality: quality, foundation: foundation, sun: sun, systemType: systemType, ceiling: ceiling, rangePct: rangePct,
-      atticR: atticR, windowU: windowU, windowSHGC: windowSHGC, ach: ach, ductType: ductType, ductCondition: ductCondition,
+      atticR: atticREffective, windowU: windowU, windowSHGC: windowSHGC, ach: ach, ductType: ductType, ductCondition: ductCondition,
       retAirMode: retAirMode, retAirDuctIn: retAirDuctIn, retAirGrilleW: retAirGrilleW, retAirGrilleH: retAirGrilleH,
       windowFrac: windowFrac, stories: stories
     };
@@ -272,11 +281,28 @@
   // Subscription tier: 0 guest · 1 solo · 2 trial/pro · 3 fleet.
   // PermitIQ + site photos unlock at tier 2 (free trial included, so
   // prospects experience the flagship feature before paying).
+  var TRIAL_DAYS = 14;
+  // A "trial" account is time-boxed: once `created` (set at signup) is more
+  // than TRIAL_DAYS old, it no longer counts as an active trial. Accounts
+  // signed up before this field existed in the session record (u.created
+  // missing) are left alone rather than force-expired on unknown data.
+  function trialDaysLeft(u) {
+    if (!u || u.plan !== "trial" || !u.created) return null;
+    var elapsedDays = (Date.now() - u.created) / 86400000;
+    return Math.ceil(TRIAL_DAYS - elapsedDays);
+  }
+  function trialExpired(u) {
+    var left = trialDaysLeft(u);
+    return left != null && left <= 0;
+  }
   function planTier() {
     var u = currentUser();
     if (!u) return 0;
-    return { solo: 1, trial: 2, pro: 2, fleet: 3 }[u.plan] != null
-      ? { solo: 1, trial: 2, pro: 2, fleet: 3 }[u.plan] : 2;
+    var plan = trialExpired(u) ? "solo" : u.plan; // expired trial falls back to Solo-level access
+    var known = { solo: 1, trial: 2, pro: 2, fleet: 3 }[plan];
+    // Fail closed (guest-level access) on an unrecognized/missing plan value
+    // rather than silently granting Pro-equivalent feature access.
+    return known != null ? known : 0;
   }
 
   // ---------- Rendering ----------
@@ -292,7 +318,7 @@
 
     var climateChip = c.source === "live"
       ? '<div class="chip live"><span class="pulse"></span>TrueClimate&nbsp;·&nbsp;<b>' + fmt(c.hours) + ' hrs</b> analyzed here</div>'
-      : '<div class="chip"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg><b>' + escapeHtml(c.city) + '</b> station data</div>';
+      : '<div class="chip' + ((c.distance || 0) > 75 ? ' warn' : '') + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg><b>' + escapeHtml(c.city) + '</b> station data' + (c.distance ? ' · ' + fmt(c.distance) + ' mi away' : '') + '</div>';
     var elevChip = (c.elevFt || 0) > 1500
       ? '<div class="chip">⛰ ' + fmt(c.elevFt) + ' ft&nbsp;·&nbsp;air ×' + r.inputs.acf + '</div>' : '';
 
@@ -319,7 +345,7 @@
             equipRow("Airflow", "≈ " + fmt(r.equipment.airflowCfm) + " CFM") +
             equipRow("Density", fmt(r.sqftPerTon) + " ft²/ton") +
           '</div>' +
-          '<div class="eq-alts">By system type: single-stage <b>' + r.sizing.single + 't</b> · two-stage <b>' + r.sizing.two + 't</b> · variable-capacity <b>' + r.sizing.variable + 't</b><span class="eq-alt-note">Variable systems modulate down to ~30–40%, so a nominal size above the load still runs efficiently. Selection follows ACCA Manual S limits (90–115%).</span></div>' +
+          '<div class="eq-alts">By system type: single-stage <b>' + r.sizing.single + 't</b> · two-stage <b>' + r.sizing.two + 't</b> · variable-capacity <b>' + r.sizing.variable + 't</b><span class="eq-alt-note">Variable systems modulate down to ~30–40%, so a nominal size above the load still runs efficiently. Fixed-capacity selection targets ACCA Manual S limits (90–115%) using the nearest half-ton step; for very small loads the closest available step can fall outside that band, which Manual S also allows.</span></div>' +
           '<p>' + r.equipment.suggestion + '</p>' +
           '<p class="eq-oversize-note">Larger than this? That\'s common: published Manual J case studies and real contractor-quote comparisons repeatedly show field-installed equipment sized 20–75% above the calculated load, usually from rule-of-thumb sizing (e.g. a flat 400–600 ft²/ton) rather than a load calc. The smaller, calculated number is typically the more accurate one — oversized equipment short-cycles, dehumidifies worse, and costs more up front and to run.</p>' +
           '</div>' +
@@ -501,6 +527,16 @@
     };
     var applied = {};
     var o = state.overrides, p = state.property;
+    // If the model returns more than one finding for the same field, only the
+    // highest-confidence one (last one wins on a tie) should actually apply —
+    // otherwise every duplicate would show status "applied" while only the
+    // last one processed actually reaches compute().
+    var winners = {};
+    res.findings.forEach(function (f) {
+      if (!f || f.field === "other" || f.confidence === "low" || f.value == null) return;
+      var w = winners[f.field];
+      if (!w || w.confidence !== "high" || f.confidence === "high") winners[f.field] = f;
+    });
     res.findings.forEach(function (f) {
       f.status = "info";
       if (f.field === "other") return; // informational only
@@ -508,6 +544,7 @@
       var overridden = (f.field === "area" || f.field === "ceiling") ? o[f.field] != null : !!o[f.field];
       if (overridden) { f.status = "kept"; return; }               // user's manual setting wins
       if (f.field === "area" && p.source === "fetched") { f.status = "kept"; f.keptWhy = "property records"; return; }
+      if (winners[f.field] !== f) { f.status = "duplicate"; return; } // superseded by another finding for the same field
       applied[f.field] = f.value;
       f.status = "applied";
     });
@@ -532,6 +569,7 @@
         applied: '<span class="ai-badge on">applied</span>',
         kept: '<span class="ai-badge kept">kept ' + (f.keptWhy || "your setting") + '</span>',
         low: '<span class="ai-badge low">low confidence — not applied</span>',
+        duplicate: '<span class="ai-badge low">duplicate — not applied</span>',
         info: '<span class="ai-badge">noted</span>'
       }[f.status];
       var val = photoFindingValue(f);
@@ -594,6 +632,7 @@
     return '' +
       '<div class="permit-card">' +
         '<div class="hp-head"><span class="ico gold">' + shieldIcon() + '</span>PermitIQ™ — ' + cityLabel + '<span class="permit-badge on">PRO</span></div>' +
+        (!code ? '<p class="pq-note">⚠ Couldn\'t resolve this address\'s state, so the efficiency floor below is unconfirmed — it defaults to the ' + eff.regionLabel + ' minimums, which may not apply here. Confirm the correct DOE region locally.</p>' : '') +
         '<p class="hp-text">Requirements compiled for <b>' + (code || "this state") + '</b> (' + eff.regionLabel + ') from federal standards and the model codes most cities adopt. Items tagged <i>verify locally</i> are set by city amendment — confirm before install.</p>' +
         '<div class="pq-sec">Minimum equipment efficiency (federal floor)</div>' +
         '<div class="equip-rows">' + effRows + '</div>' +
@@ -629,7 +668,7 @@
       "Please advise on fees, forms, and inspection scheduling.%0D%0A%0D%0A" +
       "Thank you,%0D%0A" + encodeURIComponent((s.company || "") + (s.license ? " · License " + s.license : "") + (s.phone ? " · " + s.phone : ""));
     location.href = "mailto:?subject=" + encodeURIComponent(subject) + "&body=" + body;
-    toast("Draft opened — attach the saved permit-package PDF before sending");
+    toast("Draft opened — add the permit dept.'s email and attach the saved PDF before sending");
   }
 
   // Heat-pump balance point card with a mini load-vs-capacity chart.
@@ -668,9 +707,15 @@
   // Not plan-gated: validates the return side of the duct system against the
   // equipment's required airflow. Renders nothing until the user has entered
   // a return-air mode in the final recommendation section below.
-  function returnAirCard() {
+  function returnAirCard(e) {
     var check = state.result && state.result.returnAir;
-    if (!check) return "";
+    if (!check) {
+      // A mode is selected but the dimension field(s) were left blank/invalid
+      // (returnAirCheck() returned null) — say so instead of doing nothing.
+      if (e && e.retAirMode === "ducted") return '<p class="note" style="text-align:left;margin:8px 2px 0" role="alert">Enter a duct diameter to check return air.</p>';
+      if (e && e.retAirMode === "grille") return '<p class="note" style="text-align:left;margin:8px 2px 0" role="alert">Enter grille width and height to check return air.</p>';
+      return "";
+    }
     var badge = check.ok == null ? "" : check.ok
       ? '<span class="chip ok">Adequate</span>'
       : '<span class="chip warn">Likely undersized</span>';
@@ -727,7 +772,7 @@
         '</div>' +
         '<p class="final-rec-foot">Variable-capacity systems modulate continuously instead of needing Manual S\'s fixed-capacity oversize cushion, so they\'re picked closer to the exact load — often a half-ton smaller than single/two-stage equipment, though which side of a half-ton step the exact load falls on can occasionally push it the other way. *A heat pump uses the same cooling-capacity sizing rule as an A/C — size it for the stage type above, then check the heating side: this ' + r.recommendedTons + '-ton heat pump ' + hpNote + '</p>' +
         returnAirInputHtml(e) +
-        returnAirCard() +
+        returnAirCard(e) +
       '</div>';
   }
 
@@ -790,7 +835,7 @@
             kv("Latent cooling", fmt(r.cooling.latent) + " BTU/h") +
             (e.atticR != null ? kv("Attic insulation", "R-" + e.atticR) : "") +
             (e.ductType ? kv("Duct location", ductTypeLabel(e.ductType)) : "") +
-            (e.ductCondition ? kv("Duct condition", e.ductCondition === "sealed" ? "Sealed &amp; insulated" : "Unsealed / uninsulated") : "") +
+            (e.ductType !== "ductless" && e.ductCondition ? kv("Duct condition", e.ductCondition === "sealed" ? "Sealed &amp; insulated" : "Unsealed / uninsulated") : "") +
           '</div>' +
         '</div>' +
       '</details>';
@@ -844,7 +889,7 @@
               '<input type="number" id="inWindowFrac" min="5" max="40" step="1" placeholder="leave blank for 15% default" value="' + (e.windowFrac != null ? Math.round(e.windowFrac * 100) : "") + '" /></div>' +
           '</div>' +
           '<label>Attic insulation (R-value, optional)</label>' +
-          '<input type="number" id="inAtticR" min="0" max="100" step="1" placeholder="leave blank to use construction tier above" value="' + (e.atticR != null ? e.atticR : "") + '" />' +
+          '<input type="number" id="inAtticR" min="5" max="100" step="1" placeholder="leave blank to use construction tier above (R-5 minimum)" value="' + (e.atticR != null ? e.atticR : "") + '" />' +
           '<div class="adjust-row">' +
             '<div><label>Window U-factor (optional, NFRC label)</label>' +
               '<input type="number" id="inWindowU" min="0.05" max="3" step="0.01" placeholder="blank = tier above" value="' + (e.windowU != null ? e.windowU : "") + '" /></div>' +
@@ -912,7 +957,10 @@
     if (ductTypeSel) {
       ductTypeSel.addEventListener("change", function () {
         var wrap = $("#ductCondWrap");
-        if (wrap) wrap.style.display = ductTypeSel.value === "ductless" ? "none" : "";
+        var isDuctless = ductTypeSel.value === "ductless";
+        if (wrap) wrap.style.display = isDuctless ? "none" : "";
+        var condEl = $("#inDuctCondition");
+        if (isDuctless && condEl) condEl.value = "";
       });
     }
     var rb = $("#recalcBtn");
@@ -952,8 +1000,15 @@
       // full Recalculate (the return-air check is validation-only and
       // never feeds back into the load numbers, so it doesn't need one).
 
-      // Keep displaying as a user-adjusted estimate.
-      state.property.source = "estimate";
+      // Only demote a real fetched property record to "estimate" when the
+      // contractor actually changed the area/bedrooms away from the fetched
+      // values — an unrelated fine-tune (duct type, ACH, etc.) shouldn't
+      // mislabel the data source or reopen it to a photo-AI override.
+      if (state.property.source === "fetched") {
+        var areaChanged = state.overrides.area != null && state.overrides.area !== state.property.area;
+        var bedsChanged = state.overrides.bedrooms != null && state.overrides.bedrooms !== state.property.bedrooms;
+        if (areaChanged || bedsChanged) state.property.source = "estimate";
+      }
       compute();
       render();
     });
@@ -1171,7 +1226,7 @@
     var pa = state.photoAI;
     if (!pa) return "";
     var rows = pa.findings.map(function (f) {
-      var status = { applied: "Applied to calculation", kept: "Not applied — " + (f.keptWhy ? "kept " + f.keptWhy : "manual setting kept"), low: "Observed (low confidence — not applied)", info: "Noted" }[f.status] || "Noted";
+      var status = { applied: "Applied to calculation", kept: "Not applied — " + (f.keptWhy ? "kept " + f.keptWhy : "manual setting kept"), low: "Observed (low confidence — not applied)", duplicate: "Not applied — duplicate finding for this field", info: "Noted" }[f.status] || "Noted";
       var val = photoFindingValue(f);
       return rrow(escapeHtml(PHOTO_FIELD_LABELS[f.field] || f.field) + (val ? ": " + escapeHtml(val) : ""),
                   escapeHtml(f.note || "") + ' <i>(' + status + ')</i>');
@@ -1217,7 +1272,10 @@
   }
 
   // PermitIQ appendix: efficiency floors + code checklist + submission list.
+  // Pro/Fleet only — self-gated here (not just by the caller) so a future
+  // entry point to generateReport({permit:true}) can't leak this appendix.
   function reportPermitSection() {
+    if (planTier() < 2) return "";
     var pd = window.PermitData, g = state.geo || {};
     var code = pd.stateCode(g.state);
     var eff = pd.efficiency(code || "");
@@ -1229,6 +1287,7 @@
     return '' +
       '<div class="rp-block rp-permit"><h2>Permit requirements — ' + escapeHtml(g.city || "local jurisdiction") + (code ? ", " + code : "") + '</h2>' +
         '<p class="rp-permit-sub">Compiled by PermitIQ from federal efficiency standards (' + eff.regionLabel + ') and model building codes (IRC/IMC/NEC/IECC). Items marked [verify locally] are commonly amended by cities — confirm with the building department.</p>' +
+        (!code ? '<p class="rp-permit-note">⚠ This address\'s state could not be resolved, so the region below (' + eff.regionLabel + ') is a default, not a confirmed match — verify the correct DOE region before relying on these minimums.</p>' : '') +
         '<table>' + effRows + '</table>' +
         (eff.note ? '<p class="rp-permit-note">' + eff.note + '</p>' : '') +
         '<h2 style="margin-top:14px">Installation &amp; code checklist</h2><ul class="rp-list">' + checks + '</ul>' +
@@ -1261,13 +1320,24 @@
   function openAccount() {
     var u = currentUser();
     if (!u) { location.href = "auth.html"; return; }
+    var expired = trialExpired(u);
+    var daysLeft = trialDaysLeft(u);
     var planLabel = { trial: "Free trial", solo: "Solo", pro: "Pro", fleet: "Fleet" }[u.plan] || "Free trial";
+    var trialNote = "";
+    if (u.plan === "trial") {
+      trialNote = expired
+        ? '<div class="status warn">Your 14-day free trial has ended — you now have Solo-tier access. <a class="link" href="index.html#pricing">Upgrade to Pro or Fleet</a> to get PermitIQ and PhotoScan AI back.</div>'
+        : daysLeft != null
+          ? '<div class="status">' + daysLeft + ' day' + (daysLeft === 1 ? "" : "s") + ' left in your free trial.</div>'
+          : "";
+    }
     $("#settingsRoot").innerHTML =
       '<div class="overlay" id="overlay"><div class="sheet">' +
         '<div class="grab"></div>' +
         '<h3>' + escapeHtml(u.name) + '</h3>' +
         '<p class="sub">' + escapeHtml(u.email) + (u.company ? " · " + escapeHtml(u.company) : "") + '</p>' +
         '<div class="status">Plan: <b>' + planLabel + '</b>. Billing &amp; team seats activate when your workspace goes live.</div>' +
+        trialNote +
         '<button class="save" id="acctUpgrade">See plans</button>' +
         '<button class="close" id="acctLogout">Log out</button>' +
       '</div></div>';
@@ -1376,6 +1446,7 @@
   function aiKeyLabel(id) { return window.AIProviders.getProvider(id).keyLabel; }
   function aiKeyPlaceholder(id) { return window.AIProviders.getProvider(id).keyPlaceholder; }
   function currentProviderDefaultModel(id) { return window.AIProviders.getProvider(id).defaultModel; }
+  function providerRequiresBaseUrl(id) { return !!window.AIProviders.getProvider(id).requiresBaseUrl; }
 
   function openSettings() {
     var s = loadSettings();
@@ -1411,7 +1482,8 @@
           ' Browser calls to property APIs can be blocked by CORS; if a lookup fails, the app falls back to an editable estimate.</div>' +
         '</div>' +
 
-        '<div class="set-group"><div class="set-title">AI photo analysis</div>' +
+        '<div class="set-group"><div class="set-title">AI photo analysis' + (planTier() < 2 ? ' <span class="permit-badge">PRO</span>' : '') + '</div>' +
+        (planTier() < 2 ? '<p class="sub"><span class="ico gold">' + lockIcon() + '</span> Photo analysis is a Pro/Fleet feature — you can save a key here now, but it won\'t be used until you upgrade.</p>' : '') +
         '<p class="sub" id="aiProviderSub">' + aiProviderCopy(aiProvider) + '</p>' +
         '<label>AI provider</label>' +
         '<select id="aiProvider">' + aiProviderOptions(aiProvider) + '</select>' +
@@ -1419,7 +1491,7 @@
         '<input type="password" id="aiKey" placeholder="' + (hasAiKey ? "•••••• saved" : aiKeyPlaceholder(aiProvider) + " (optional)") + '" />' +
         '<div class="set-two">' +
           '<div><label>Model override</label><input type="text" id="aiModel" value="' + escapeAttr(s.aiModel || "") + '" placeholder="' + escapeAttr(currentProviderDefaultModel(aiProvider) || "required") + '" /></div>' +
-          '<div id="aiBaseUrlWrap" style="' + (aiProvider === "custom" ? "" : "display:none") + '"><label>Base URL</label><input type="text" id="aiBaseUrl" value="' + escapeAttr(s.aiBaseUrl || "") + '" placeholder="https://your-endpoint/v1/chat/completions" /></div>' +
+          '<div id="aiBaseUrlWrap" style="' + (providerRequiresBaseUrl(aiProvider) ? "" : "display:none") + '"><label>Base URL</label><input type="text" id="aiBaseUrl" value="' + escapeAttr(s.aiBaseUrl || "") + '" placeholder="https://your-endpoint/v1/chat/completions" /></div>' +
         '</div>' +
         '<div class="status">' + (hasAiKey ? "✓ A key is saved on this device — it never leaves it except to call the provider's API directly." : "No key set — photo analysis stays off; everything else works normally.") + '</div>' +
         '</div>' +
@@ -1453,7 +1525,13 @@
       $("#aiKeyLabel").textContent = aiKeyLabel(id);
       $("#aiKey").placeholder = aiKeyPlaceholder(id) + " (optional)";
       $("#aiModel").placeholder = currentProviderDefaultModel(id) || "required";
-      $("#aiBaseUrlWrap").style.display = (id === "custom") ? "" : "none";
+      $("#aiBaseUrlWrap").style.display = providerRequiresBaseUrl(id) ? "" : "none";
+      // Switching providers must not silently carry over the previous
+      // provider's saved key/model to the newly-selected one's endpoint.
+      if (id !== aiProvider) {
+        $("#aiKey").value = "";
+        $("#aiModel").value = "";
+      }
     });
 
     $("#saveSettings").addEventListener("click", function () {
@@ -1464,12 +1542,15 @@
       cur.email = $("#setEmail").value.trim();
       var v = $("#apiKey").value.trim();
       if (v) cur.propertyApiKey = v; // empty keeps existing key
-      cur.aiProvider = $("#aiProvider").value;
+      var newAiProvider = $("#aiProvider").value;
+      var aiProviderChanged = newAiProvider !== cur.aiProvider;
+      cur.aiProvider = newAiProvider;
       var ak = $("#aiKey").value.trim();
       if (ak) cur.aiApiKey = ak; // empty keeps existing key
+      else if (aiProviderChanged) delete cur.aiApiKey; // don't leak the old provider's key to the new one
       var am = $("#aiModel").value.trim();
       if (am) cur.aiModel = am; else delete cur.aiModel; // blank = fall back to the provider's current default
-      if (cur.aiProvider === "custom") {
+      if (providerRequiresBaseUrl(cur.aiProvider)) {
         var abu = $("#aiBaseUrl").value.trim();
         if (abu) cur.aiBaseUrl = abu;
       } else {
@@ -1511,6 +1592,9 @@
         $("#address").value = shortAddr(geo.label);
         resetGeoBtn();
         runFromCoords(geo);
+      }).catch(function () {
+        resetGeoBtn();
+        showError("Couldn't determine your address from that location. Enter an address instead.");
       });
     }, function () {
       resetGeoBtn();
