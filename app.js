@@ -216,31 +216,44 @@
     // Optional fine-tune inputs: attic insulation, duct type/condition, return-air sizing.
     // Unset (undefined) means "use legacy/default behavior" in the calc engine.
     var atticR = o.atticR != null ? o.atticR : undefined;
+    var windowU = o.windowU != null ? o.windowU : undefined;
+    var windowSHGC = o.windowSHGC != null ? o.windowSHGC : undefined;
+    var ach = o.ach != null ? o.ach : undefined;
     var ductType = o.ductType || undefined;
     var ductCondition = o.ductCondition || undefined;
     var retAirMode = o.retAirMode || undefined;
     var retAirDuctIn = o.retAirDuctIn != null ? o.retAirDuctIn : undefined;
     var retAirGrilleW = o.retAirGrilleW != null ? o.retAirGrilleW : undefined;
     var retAirGrilleH = o.retAirGrilleH != null ? o.retAirGrilleH : undefined;
+    // Window amount and story count: an explicit user entry beats a PhotoScan
+    // AI read, which beats the calc engine's own default/heuristic. Left
+    // undefined (both omitted) keeps exact legacy behavior in loadcalc.js.
+    var windowFrac = o.windowFrac != null ? o.windowFrac : (pa.windowFrac != null ? pa.windowFrac : undefined);
+    var stories = o.stories != null ? o.stories : (pa.stories != null ? pa.stories : undefined);
     state.effective = {
       area: area, bedrooms: bedrooms, quality: quality, foundation: foundation, sun: sun, systemType: systemType, ceiling: ceiling, rangePct: rangePct,
-      atticR: atticR, ductType: ductType, ductCondition: ductCondition,
-      retAirMode: retAirMode, retAirDuctIn: retAirDuctIn, retAirGrilleW: retAirGrilleW, retAirGrilleH: retAirGrilleH
+      atticR: atticR, windowU: windowU, windowSHGC: windowSHGC, ach: ach, ductType: ductType, ductCondition: ductCondition,
+      retAirMode: retAirMode, retAirDuctIn: retAirDuctIn, retAirGrilleW: retAirGrilleW, retAirGrilleH: retAirGrilleH,
+      windowFrac: windowFrac, stories: stories
     };
     var opts = {
       area: area, bedrooms: bedrooms, quality: quality, foundation: foundation, sun: sun, systemType: systemType, ceiling: ceiling,
       heating99: c.heating99, cooling1: c.cooling1, outGrains: c.outGrains,
       elevFt: c.elevFt || 0, rangePct: rangePct
     };
-    if (pa.windowFrac != null) opts.windowFrac = pa.windowFrac;
-    // Only set when the user has actually specified them — an explicit ductType
-    // signals the calc engine to use the new duct-loss formula; omitted keeps
+    // Only set when actually specified — an explicit value signals the calc
+    // engine to use it in place of its own default/heuristic; omitted keeps
     // legacy behavior. (retAir* fields are for the separate return-air adequacy
     // check being wired up in a sibling change — not consumed by compute() —
     // so they're captured into state above but intentionally left off opts here.)
     if (atticR != null) opts.atticR = atticR;
+    if (windowU != null) opts.windowU = windowU;
+    if (windowSHGC != null) opts.windowSHGC = windowSHGC;
+    if (ach != null) opts.ach = ach;
     if (ductType != null) opts.ductType = ductType;
     if (ductCondition != null) opts.ductCondition = ductCondition;
+    if (windowFrac != null) opts.windowFrac = windowFrac;
+    if (stories != null) opts.stories = stories;
     state.result = window.LoadCalc.compute(opts);
     // Return-air adequacy is validation-only (doesn't feed back into the load),
     // so it's computed once here off the just-computed result and stored on
@@ -307,11 +320,12 @@
             equipRow("Density", fmt(r.sqftPerTon) + " ft²/ton") +
           '</div>' +
           '<div class="eq-alts">By system type: single-stage <b>' + r.sizing.single + 't</b> · two-stage <b>' + r.sizing.two + 't</b> · variable-capacity <b>' + r.sizing.variable + 't</b><span class="eq-alt-note">Variable systems modulate down to ~30–40%, so a nominal size above the load still runs efficiently. Selection follows ACCA Manual S limits (90–115%).</span></div>' +
-          '<p>' + r.equipment.suggestion + '</p></div>' +
+          '<p>' + r.equipment.suggestion + '</p>' +
+          '<p class="eq-oversize-note">Larger than this? That\'s common: published Manual J case studies and real contractor-quote comparisons repeatedly show field-installed equipment sized 20–75% above the calculated load, usually from rule-of-thumb sizing (e.g. a flat 400–600 ft²/ton) rather than a load calc. The smaller, calculated number is typically the more accurate one — oversized equipment short-cycles, dehumidifies worse, and costs more up front and to run.</p>' +
+          '</div>' +
       '</div>' +
 
       hpCard(r, c) +
-      returnAirCard() +
       photosCard() +
       photoInsightsCard() +
       permitCard() +
@@ -322,7 +336,9 @@
       '</div>' +
 
       detailsBlock(r, c, e, qualityLabel) +
-      adjustBlock(e, p);
+      adjustBlock(e, p) +
+
+      finalRecommendationCard(r, e, c);
 
     var el = $("#results");
     el.innerHTML = html;
@@ -338,7 +354,7 @@
     $("#shareBtn").addEventListener("click", shareResult);
     wirePhotos();
     wirePermit();
-    wireReturnAir();
+    wireFinalRec();
 
     saveActiveToHistory();
     el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -487,7 +503,7 @@
     var o = state.overrides, p = state.property;
     res.findings.forEach(function (f) {
       f.status = "info";
-      if (f.field === "other" || f.field === "stories") return; // informational only
+      if (f.field === "other") return; // informational only
       if (f.confidence === "low" || f.value == null) { f.status = "low"; return; }
       var overridden = (f.field === "area" || f.field === "ceiling") ? o[f.field] != null : !!o[f.field];
       if (overridden) { f.status = "kept"; return; }               // user's manual setting wins
@@ -650,8 +666,8 @@
 
   // ---------- Return air adequacy check ----------
   // Not plan-gated: validates the return side of the duct system against the
-  // equipment's required airflow. Renders nothing until the user has set a
-  // return-air mode in Fine-tune inputs.
+  // equipment's required airflow. Renders nothing until the user has entered
+  // a return-air mode in the final recommendation section below.
   function returnAirCard() {
     var check = state.result && state.result.returnAir;
     if (!check) return "";
@@ -666,10 +682,80 @@
         '<p class="pq-disc">' + escapeHtml(check.disclosure) + '</p>' +
       '</div>';
   }
-  function wireReturnAir() {
-    // Pure display card for now — no click handlers of its own. Present for
-    // symmetry with wirePhotos()/wirePermit() and as a hook for future
-    // interactivity (e.g. a "learn more" toggle).
+
+  // Return-air input widget: mode select + duct-diameter or grille-W/H fields,
+  // plus its own "Check" button. Deliberately separate from the main
+  // Recalculate flow in adjustBlock() — returnAirCheck() is validation-only
+  // (see loadcalc.js) and never changes the load numbers, so checking it
+  // shouldn't require re-running the whole calculation.
+  function returnAirInputHtml(e) {
+    return '' +
+      '<div class="retair-input adjust">' +
+        '<label>Return duct or return grille size</label>' +
+        '<select id="inRetAirMode">' +
+          '<option value=""' + (!e.retAirMode ? " selected" : "") + '>Not specified</option>' +
+          opt("ducted", "Ducted return (has a return trunk)", e.retAirMode) +
+          opt("grille", "Direct return grille (no trunk)", e.retAirMode) +
+        '</select>' +
+        '<div id="retAirFields">' + retAirFieldsHtml(e.retAirMode, e) + '</div>' +
+        '<button class="recalc" id="checkRetAirBtn">Check return air</button>' +
+        '<p class="note" style="text-align:left;margin:8px 2px 0">Proper airflow needs about <b>144 sq in of return opening per ton</b> (a standard field rule) — too little and the system starves for air, runs inefficiently, and wears out early, no matter how correctly the equipment itself is sized.</p>' +
+      '</div>';
+  }
+
+  // ---------- Final recommendation (bottom of the results page) ----------
+  // The headline answer, in one place, sized for whatever equipment the
+  // homeowner ends up installing: fixed-capacity systems (single/two-stage)
+  // are sized differently than a heat pump's backup-heat tradeoff, and a
+  // variable-capacity system can legitimately come in smaller since it
+  // modulates instead of needing Manual S's fixed-capacity oversize cushion.
+  function finalRecommendationCard(r, e, c) {
+    var hp = r.heatpump;
+    var hpNote = hp.auxBtu > 500
+      ? 'covers this home down to about <b>' + hp.balanceF + '°F</b>; below that, plan on ≈<b>' + hp.auxKw + ' kW</b> (' + fmt(hp.auxBtu) + ' BTU/h) of backup heat at the ' + c.heating99 + '°F design low.'
+      : 'covers this home alone all the way to the ' + c.heating99 + '°F design low — no backup heat needed.';
+    return '' +
+      '<div class="final-rec">' +
+        '<div class="final-rec-head">LoadMaster Pro AI recommends a</div>' +
+        '<div class="final-rec-tons">' + r.recommendedTons + '<span>-ton system</span></div>' +
+        '<p class="final-rec-sub">for this home\'s ' + fmt(r.cooling.total) + ' BTU/h design cooling load. The right number below depends on which kind of system actually goes in the house:</p>' +
+        '<div class="final-rec-grid">' +
+          '<div class="final-rec-row"><span>Single-stage A/C or gas furnace split system</span><b>' + r.sizing.single + ' tons</b></div>' +
+          '<div class="final-rec-row"><span>Two-stage system</span><b>' + r.sizing.two + ' tons</b></div>' +
+          '<div class="final-rec-row"><span>Variable-capacity (inverter) system</span><b>' + r.sizing.variable + ' tons</b></div>' +
+          '<div class="final-rec-row hp"><span>Heat pump (any stage)</span><b>' + r.recommendedTons + ' tons*</b></div>' +
+        '</div>' +
+        '<p class="final-rec-foot">Variable-capacity systems modulate continuously instead of needing Manual S\'s fixed-capacity oversize cushion, so they\'re picked closer to the exact load — often a half-ton smaller than single/two-stage equipment, though which side of a half-ton step the exact load falls on can occasionally push it the other way. *A heat pump uses the same cooling-capacity sizing rule as an A/C — size it for the stage type above, then check the heating side: this ' + r.recommendedTons + '-ton heat pump ' + hpNote + '</p>' +
+        returnAirInputHtml(e) +
+        returnAirCard() +
+      '</div>';
+  }
+
+  function wireFinalRec() {
+    // Swap the return-air field(s) (duct diameter vs. grille width/height)
+    // the instant the mode changes, without requiring a check click.
+    var retModeSel = $("#inRetAirMode");
+    if (retModeSel) {
+      retModeSel.addEventListener("change", function () {
+        var wrap = $("#retAirFields");
+        if (wrap) wrap.innerHTML = retAirFieldsHtml(retModeSel.value, state.effective);
+      });
+    }
+    var checkBtn = $("#checkRetAirBtn");
+    if (checkBtn) checkBtn.addEventListener("click", function () {
+      var retModeEl = $("#inRetAirMode");
+      state.overrides.retAirMode = retModeEl && retModeEl.value ? retModeEl.value : undefined;
+      var retDuctEl = $("#inRetAirDuctIn"); var retDuctVal = retDuctEl ? parseFloat(retDuctEl.value) : NaN;
+      state.overrides.retAirDuctIn = isFinite(retDuctVal) && retDuctVal > 0 ? retDuctVal : undefined;
+      var retGWEl = $("#inRetAirGrilleW"); var retGWVal = retGWEl ? parseFloat(retGWEl.value) : NaN;
+      state.overrides.retAirGrilleW = isFinite(retGWVal) && retGWVal > 0 ? retGWVal : undefined;
+      var retGHEl = $("#inRetAirGrilleH"); var retGHVal = retGHEl ? parseFloat(retGHEl.value) : NaN;
+      state.overrides.retAirGrilleH = isFinite(retGHVal) && retGHVal > 0 ? retGHVal : undefined;
+      compute();   // validation-only field: recomputes returnAir, load numbers are unchanged
+      render();
+      var card = $(".retair-card");
+      if (card) card.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
   }
   function returnAirIcon() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h13"/><path d="M12 7l5 5-5 5"/><path d="M21 5v14"/></svg>'; }
 
@@ -744,8 +830,29 @@
             '<div><label>Ceiling height (ft)</label>' +
             '<input type="number" id="inCeiling" min="7" max="20" step="0.5" value="' + e.ceiling + '" /></div>' +
           '</div>' +
+          '<div class="adjust-row">' +
+            '<div><label>Stories</label>' +
+              '<select id="inStories">' +
+                '<option value=""' + (e.stories == null ? " selected" : "") + '>Auto (estimated from floor area)</option>' +
+                opt("1", "1", e.stories != null ? String(e.stories) : "") +
+                opt("1.5", "1.5", e.stories != null ? String(e.stories) : "") +
+                opt("2", "2", e.stories != null ? String(e.stories) : "") +
+                opt("3", "3", e.stories != null ? String(e.stories) : "") +
+                opt("4", "4", e.stories != null ? String(e.stories) : "") +
+              '</select></div>' +
+            '<div><label>Window amount (% of floor area, optional)</label>' +
+              '<input type="number" id="inWindowFrac" min="5" max="40" step="1" placeholder="leave blank for 15% default" value="' + (e.windowFrac != null ? Math.round(e.windowFrac * 100) : "") + '" /></div>' +
+          '</div>' +
           '<label>Attic insulation (R-value, optional)</label>' +
           '<input type="number" id="inAtticR" min="0" max="100" step="1" placeholder="leave blank to use construction tier above" value="' + (e.atticR != null ? e.atticR : "") + '" />' +
+          '<div class="adjust-row">' +
+            '<div><label>Window U-factor (optional, NFRC label)</label>' +
+              '<input type="number" id="inWindowU" min="0.05" max="3" step="0.01" placeholder="blank = tier above" value="' + (e.windowU != null ? e.windowU : "") + '" /></div>' +
+            '<div><label>Window SHGC (optional, NFRC label)</label>' +
+              '<input type="number" id="inWindowSHGC" min="0.05" max="1" step="0.01" placeholder="blank = tier above" value="' + (e.windowSHGC != null ? e.windowSHGC : "") + '" /></div>' +
+          '</div>' +
+          '<label>Air sealing — ACH natural (optional, from a blower-door/energy audit)</label>' +
+          '<input type="number" id="inAch" min="0.05" max="3" step="0.01" placeholder="leave blank to use construction tier above" value="' + (e.ach != null ? e.ach : "") + '" />' +
           '<div class="adjust-row">' +
             '<div><label>Duct location</label>' +
               '<select id="inDuctType">' +
@@ -762,13 +869,7 @@
                 opt("sealed", "Sealed &amp; insulated", e.ductCondition) + opt("unsealed", "Unsealed / uninsulated", e.ductCondition) +
               '</select></div>' +
           '</div>' +
-          '<label>Return air</label>' +
-          '<select id="inRetAirMode">' +
-            '<option value=""' + (!e.retAirMode ? " selected" : "") + '>Not specified</option>' +
-            opt("ducted", "Ducted return (has a return trunk)", e.retAirMode) +
-            opt("grille", "Direct return grille (no trunk)", e.retAirMode) +
-          '</select>' +
-          '<div id="retAirFields">' + retAirFieldsHtml(e.retAirMode, e) + '</div>' +
+          '<p class="note" style="text-align:left;margin:10px 2px 0">Return duct/grille sizing has its own check at the bottom of the page — it\'s a separate, instant check that doesn\'t need a full recalculate.</p>' +
           '<button class="recalc" id="recalcBtn">Recalculate</button>' +
         '</div>' +
       '</details>';
@@ -814,15 +915,6 @@
         if (wrap) wrap.style.display = ductTypeSel.value === "ductless" ? "none" : "";
       });
     }
-    // Swap the return-air field(s) (duct diameter vs. grille width/height)
-    // the instant the mode changes, without requiring a Recalculate click.
-    var retModeSel = $("#inRetAirMode");
-    if (retModeSel) {
-      retModeSel.addEventListener("change", function () {
-        var wrap = $("#retAirFields");
-        if (wrap) wrap.innerHTML = retAirFieldsHtml(retModeSel.value, state.effective);
-      });
-    }
     var rb = $("#recalcBtn");
     if (rb) rb.addEventListener("click", function () {
       var area = parseFloat($("#inArea").value);
@@ -837,20 +929,28 @@
       state.overrides.systemType = $("#inSystem").value;
       state.overrides.ceiling = isFinite(ceiling) ? ceiling : undefined;
 
+      var storiesEl = $("#inStories"); var storiesVal = storiesEl ? parseFloat(storiesEl.value) : NaN;
+      state.overrides.stories = isFinite(storiesVal) && storiesVal > 0 ? storiesVal : undefined;
+      var winFracEl = $("#inWindowFrac"); var winFracVal = winFracEl ? parseFloat(winFracEl.value) : NaN;
+      state.overrides.windowFrac = isFinite(winFracVal) && winFracVal > 0 ? winFracVal / 100 : undefined;
+
       var atticR = parseFloat($("#inAtticR") ? $("#inAtticR").value : "");
       state.overrides.atticR = isFinite(atticR) && atticR > 0 ? atticR : undefined;
+      var windowUEl = $("#inWindowU"); var windowUVal = windowUEl ? parseFloat(windowUEl.value) : NaN;
+      state.overrides.windowU = isFinite(windowUVal) && windowUVal > 0 ? windowUVal : undefined;
+      var windowSHGCEl = $("#inWindowSHGC"); var windowSHGCVal = windowSHGCEl ? parseFloat(windowSHGCEl.value) : NaN;
+      state.overrides.windowSHGC = isFinite(windowSHGCVal) && windowSHGCVal > 0 ? windowSHGCVal : undefined;
+      var achEl = $("#inAch"); var achVal = achEl ? parseFloat(achEl.value) : NaN;
+      state.overrides.ach = isFinite(achVal) && achVal > 0 ? achVal : undefined;
       var ductTypeEl = $("#inDuctType");
       state.overrides.ductType = ductTypeEl && ductTypeEl.value ? ductTypeEl.value : undefined;
       var ductCondEl = $("#inDuctCondition");
       state.overrides.ductCondition = ductCondEl && ductCondEl.value ? ductCondEl.value : undefined;
-      var retModeEl = $("#inRetAirMode");
-      state.overrides.retAirMode = retModeEl && retModeEl.value ? retModeEl.value : undefined;
-      var retDuctEl = $("#inRetAirDuctIn"); var retDuctVal = retDuctEl ? parseFloat(retDuctEl.value) : NaN;
-      state.overrides.retAirDuctIn = isFinite(retDuctVal) && retDuctVal > 0 ? retDuctVal : undefined;
-      var retGWEl = $("#inRetAirGrilleW"); var retGWVal = retGWEl ? parseFloat(retGWEl.value) : NaN;
-      state.overrides.retAirGrilleW = isFinite(retGWVal) && retGWVal > 0 ? retGWVal : undefined;
-      var retGHEl = $("#inRetAirGrilleH"); var retGHVal = retGHEl ? parseFloat(retGHEl.value) : NaN;
-      state.overrides.retAirGrilleH = isFinite(retGHVal) && retGHVal > 0 ? retGHVal : undefined;
+      // Return-air fields are NOT read here — they live in the final
+      // recommendation section's own instant check (wireFinalRec), which
+      // writes the same state.overrides.retAir* keys without requiring a
+      // full Recalculate (the return-air check is validation-only and
+      // never feeds back into the load numbers, so it doesn't need one).
 
       // Keep displaying as a user-adjusted estimate.
       state.property.source = "estimate";
@@ -1006,6 +1106,12 @@
           '<div class="rp-res cool"><span>Cooling load</span><b>' + fmt(r.cooling.total) + '</b><em>BTU/h · ' + r.recommendedTons + ' tons · expected ' + fmt(r.cooling.range.low) + '–' + fmt(r.cooling.range.high) + '</em></div>' +
         '</div>' +
         '<div class="rp-equip"><b>Equipment plan:</b> ' + r.recommendedTons + '-ton cooling (' + fmt(r.equipment.acBtu) + ' BTU/h) at ≈' + fmt(r.equipment.airflowCfm) + ' CFM; heating via ' + fmt(r.equipment.furnaceOutput) + ' BTU/h-output furnace or heat pump. Heat-pump balance point ≈ <b>' + r.heatpump.balanceF + '°F</b>' + (r.heatpump.auxBtu > 500 ? ' with ≈' + r.heatpump.auxKw + ' kW backup at design' : ' — no backup needed at design') + '. ' + r.equipment.suggestion + '</div>' +
+        '<div class="rp-block rp-final-rec"><h2>Final recommendation — by system type</h2><table>' +
+          rrow("Single-stage A/C or gas furnace split system", r.sizing.single + " tons") +
+          rrow("Two-stage system", r.sizing.two + " tons") +
+          rrow("Variable-capacity (inverter) system", r.sizing.variable + " tons") +
+          rrow("Heat pump (any stage)", r.recommendedTons + " tons") +
+        '</table><p class="rp-disc" style="margin-top:6px">Variable-capacity systems modulate continuously instead of needing Manual S\'s fixed-capacity oversize cushion, so they\'re picked closer to the exact load — often a half-ton smaller than single/two-stage equipment, though which side of a half-ton step the exact load falls on can occasionally push it the other way. A heat pump follows the same cooling-capacity rule as an A/C for the stage type chosen — see the balance point above for its heating-side backup requirement.</p></div>' +
         '<div class="rp-cols">' +
           '<div class="rp-block"><h2>Design conditions</h2><table>' +
             rrow("Climate source", c.source === "live" ? "Site analysis — " + fmt(c.hours) + " hrs of hourly weather" : "Nearest station: " + escapeHtml(c.city)) +

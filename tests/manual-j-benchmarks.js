@@ -178,5 +178,78 @@ function checkTrue(label, ok, detail) {
   );
 }
 
+console.log("\n=== Full-spec published Manual J case studies (windowU/windowSHGC/ach overrides) ===");
+/*
+ * Burdick, A. (IBACOS), "Strategy Guideline: Accurate Heating and Cooling
+ * Load Calculations," NREL/DOE Building America, June 2011
+ * (docs.nrel.gov/docs/fy11osti/51603.pdf) — two paired 2,223 ft², one-story,
+ * 2009-IECC-compliant reference houses with full envelope specs and
+ * professionally-run Manual J outputs. Reverse-engineered input mapping:
+ *   Chicago (CZ5): R-19 2x6 walls -> closest tier "average" (uWall 0.080);
+ *     R-38 vented attic -> atticR:38; U-0.35/SHGC-0.50 windows -> exact
+ *     override; conditioned basement -> foundation "basement"; ducts in
+ *     conditioned space -> ductType "conditioned-space"/sealed; measured
+ *     0.19 ACHnatural (heating) -> ach override (~3x tighter than the
+ *     "average" tier's flat 0.55 -- a 2009-code home's air sealing is
+ *     decoupled from its wall/window performance, same lesson as Orlando).
+ *   Orlando (CZ2): CMU block + 3/4" XPS R-4.8 wall -> closest tier "poor"
+ *     (uWall 0.130, corroborated: the block's own R-value + air films bring
+ *     the true assembly close to this without a separate override -- see
+ *     the code comment above where a literal wallR override was tried and
+ *     rejected); R-31 encapsulated attic -> atticR:31; U-0.65/SHGC-0.30
+ *     windows -> exact override (this SHGC is what the "poor" tier's flat
+ *     0.60 badly overstates -- see below); slab-on-grade; sealed attic
+ *     ducts; measured 0.10 ACHnatural -> ach override.
+ * Neither house's Manual J includes only conduction/solar/infiltration --
+ * both also add a distinct ASHRAE-62.2 mechanical-ventilation load term this
+ * engine has no equivalent for, and the coarse 3-tier wall bucket can't hit
+ * an arbitrary real wall exactly -- so a generous ~±30% band is the honest
+ * bar here, not a tight one. What this validates is the *shape* of the fix:
+ * before the windowU/windowSHGC/ach overrides existed, this same input
+ * mapping (quality tier only, no overrides) produced Orlando cooling of
+ * 52,816 BTU/h against a published 20,700 -- a 155% overstatement, because
+ * the "poor" tier's SHGC 0.60 and ach 0.90 don't reflect this specific
+ * (real, published) house's actual low-SHGC hurricane glass and code-tight
+ * air sealing. With the overrides supplying the house's real numbers, that
+ * error drops to 25,448 (23% high) -- confirming the overrides fix a real,
+ * large, previously-undiagnosable error mode, not just a cosmetic option.
+ */
+{
+  const chi = climate("Chicago");
+  const chicago = LoadCalc.compute({
+    area: 2223, quality: "average", foundation: "basement", sun: "average", bedrooms: 4,
+    atticR: 38, windowU: 0.35, windowSHGC: 0.50, ach: 0.19, ductType: "conditioned-space", ductCondition: "sealed",
+    heating99: chi.heating99, cooling1: chi.cooling1, outGrains: chi.outGrains, elevFt: 0, systemType: "single"
+  });
+  console.log(`NREL Chicago House (2,223 ft², CZ5) [published: heat 41,700 / cool 20,600 BTU/h]`);
+  console.log(`   engine: heat ${chicago.heating.total.toLocaleString()} BTU/h · cool ${chicago.cooling.total.toLocaleString()} BTU/h`);
+  check("Chicago House heating (±~30% band, missing ventilation term biases low)", chicago.heating.total, 28000, 44000, " BTU/h");
+  check("Chicago House cooling (±~30% band)", chicago.cooling.total, 18000, 27000, " BTU/h");
+
+  const orl = climate("Orlando");
+  const orlando = LoadCalc.compute({
+    area: 2223, quality: "poor", foundation: "slab", sun: "average", bedrooms: 4,
+    atticR: 31, windowU: 0.65, windowSHGC: 0.30, ach: 0.10, ductType: "attic", ductCondition: "sealed",
+    heating99: orl.heating99, cooling1: orl.cooling1, outGrains: orl.outGrains, elevFt: 0, systemType: "single"
+  });
+  console.log(`NREL Orlando House (2,223 ft², CZ2) [published: heat 23,600 / cool 20,700 BTU/h]`);
+  console.log(`   engine: heat ${orlando.heating.total.toLocaleString()} BTU/h · cool ${orlando.cooling.total.toLocaleString()} BTU/h`);
+  check("Orlando House heating (±~30% band)", orlando.heating.total, 16000, 30000, " BTU/h");
+  check("Orlando House cooling (±~30% band, still runs high -- wall-tier granularity)", orlando.cooling.total, 18000, 28000, " BTU/h");
+
+  // The regression check: without the overrides (quality tier alone), the
+  // Orlando case overstates cooling by >100%. This is the error the
+  // windowU/windowSHGC/ach overrides exist to fix -- assert it stays fixed.
+  const orlandoNoOverrides = LoadCalc.compute({
+    area: 2223, quality: "poor", foundation: "slab", sun: "average", bedrooms: 4,
+    heating99: orl.heating99, cooling1: orl.cooling1, outGrains: orl.outGrains, elevFt: 0, systemType: "single"
+  });
+  checkTrue(
+    "windowU/windowSHGC/ach overrides fix the >100% Orlando-case cooling overstatement",
+    orlando.cooling.total < orlandoNoOverrides.cooling.total * 0.70,
+    `with overrides ${orlando.cooling.total} vs tier-only ${orlandoNoOverrides.cooling.total}`
+  );
+}
+
 console.log(`\n${fail === 0 ? "✅ ALL CHECKS PASSED" : "❌ " + fail + " CHECK(S) FAILED"} (${pass} passed)`);
 process.exit(fail ? 1 : 0);

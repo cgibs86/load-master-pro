@@ -236,7 +236,13 @@
     const outGrains = o.outGrains;   // outdoor design humidity, grains/lb
 
     // --- Geometry estimated from floor area ---
-    const stories = o.area > 2200 ? 2 : 1;
+    // Story count drives wall height/roof area independently of floor area
+    // (e.g. a 3,200 ft² two-story home has half the footprint/roof of a
+    // 3,200 ft² single-story one). An explicit override (manual entry or a
+    // PhotoScan AI read of the actual home) beats the area-threshold guess;
+    // omitted keeps exact legacy behavior.
+    const storiesNum = o.stories != null ? Number(o.stories) : NaN;
+    const stories = (!isNaN(storiesNum) && storiesNum > 0) ? storiesNum : (o.area > 2200 ? 2 : 1);
     const footprint = o.area / stories;
     const wallHeight = o.ceiling * stories;          // total exterior wall height
     const perimeter = 4 * Math.sqrt(footprint);       // assume ~square footprint
@@ -254,8 +260,19 @@
     const sensC = 1.08 * acf;                         // sensible air constant
     const latC = 0.68 * acf;                          // latent air constant
 
+    // Air changes per hour: an explicit blower-door/ACH50-derived value (or a
+    // known code-target ACHnatural) beats the per-quality-tier guess — air
+    // sealing is largely independent of wall/window R-value (validated against
+    // a published NREL Manual J case: a 2009-IECC "poor"-walled CMU-block
+    // Florida house measured ACHn 0.10, ~9× tighter than the "poor" tier's
+    // flat 0.90 default, which alone accounted for most of a >100% cooling
+    // overstatement before this override existed). Guarded to a plausible
+    // range; omitted -> exact legacy per-tier ach.
+    const achNum = o.ach != null ? Number(o.ach) : NaN;
+    const achEff = (!isNaN(achNum) && achNum > 0 && achNum <= 3) ? achNum : q.ach;
+
     // Natural infiltration converted to CFM.
-    const cfm = (q.ach * volume) / 60;
+    const cfm = (achEff * volume) / 60;
 
     // Design temperature differences.
     const dtHeat = Math.max(0, o.indoorHeat - heating99);
@@ -269,10 +286,34 @@
     const atticRNum = o.atticR != null ? Number(o.atticR) : NaN;
     const uRoofEff = (!isNaN(atticRNum) && atticRNum >= 5) ? 1 / (atticRNum + ROOF_BASE_R) : q.uRoof;
 
+    // (A wallR override analogous to atticR was tried and rejected during
+    // validation against published NREL Manual J case studies: unlike a roof
+    // deck, wall assemblies vary too much by type — wood-frame effective R is
+    // ~20-30% below cavity-insulation R due to framing thermal bridging, while
+    // a CMU block wall's total R includes the block itself plus air films, not
+    // just the applied continuous insulation layer. A flat baseline constant
+    // (like ROOF_BASE_R) made both a wood-frame and a CMU-block validation
+    // case measurably worse, not better, so no override is exposed here — the
+    // per-quality-tier q.uWall remains the estimate.)
+
+    // Window U-factor / SHGC overrides: the 3-tier quality bucket ties glazing
+    // performance to overall wall/attic quality, which real homes routinely
+    // decouple (e.g. impact-rated low-SHGC hurricane glass on an otherwise
+    // "poor" CMU-block Florida house — validated against a published NREL
+    // Manual J case study where using the "poor" tier's SHGC 0.60 instead of
+    // that house's actual 0.30 glass overstated cooling load by >100%).
+    // NFRC window labels always list both values, so either can be entered
+    // independently. Guarded against nonsensical entries; omitted -> exact
+    // legacy per-tier behavior.
+    const winUNum = o.windowU != null ? Number(o.windowU) : NaN;
+    const uWinEff = (!isNaN(winUNum) && winUNum > 0 && winUNum <= 3) ? winUNum : q.uWin;
+    const winSHGCNum = o.windowSHGC != null ? Number(o.windowSHGC) : NaN;
+    const shgcEff = (!isNaN(winSHGCNum) && winSHGCNum > 0 && winSHGCNum <= 1) ? winSHGCNum : q.shgc;
+
     // Conductive UA (BTU/hr·°F). Floor counts for heating, dropped for cooling
     // (ground stays near/below indoor temp in summer).
-    const uaHeat = q.uWall * netWall + q.uWin * windowArea + uRoofEff * roofArea + uFloorEff * floorArea;
-    const uaCool = q.uWall * netWall + q.uWin * windowArea + uRoofEff * roofArea;
+    const uaHeat = q.uWall * netWall + uWinEff * windowArea + uRoofEff * roofArea + uFloorEff * floorArea;
+    const uaCool = q.uWall * netWall + uWinEff * windowArea + uRoofEff * roofArea;
 
     // ---------- HEATING ----------
     const hConduction = uaHeat * dtHeat;
@@ -283,7 +324,7 @@
     // ---------- COOLING ----------
     const occupants = (o.bedrooms || 0) + 1;
     const cConduction = uaCool * dtCool;
-    const cSolar = windowArea * q.shgc * o.solarFlux * sunMult;
+    const cSolar = windowArea * shgcEff * o.solarFlux * sunMult;
     const cPeopleSens = occupants * 230;
     const cInternal = 1200 + o.area * 0.6;            // appliances + lighting/plug loads
     const cInfilSens = sensC * cfm * dtCool;
