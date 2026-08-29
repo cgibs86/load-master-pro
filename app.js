@@ -326,7 +326,6 @@
       '</div>' +
 
       hpCard(r, c) +
-      returnAirCard() +
       photosCard() +
       photoInsightsCard() +
       permitCard() +
@@ -337,7 +336,9 @@
       '</div>' +
 
       detailsBlock(r, c, e, qualityLabel) +
-      adjustBlock(e, p);
+      adjustBlock(e, p) +
+
+      finalRecommendationCard(r, e, c);
 
     var el = $("#results");
     el.innerHTML = html;
@@ -353,7 +354,7 @@
     $("#shareBtn").addEventListener("click", shareResult);
     wirePhotos();
     wirePermit();
-    wireReturnAir();
+    wireFinalRec();
 
     saveActiveToHistory();
     el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -665,8 +666,8 @@
 
   // ---------- Return air adequacy check ----------
   // Not plan-gated: validates the return side of the duct system against the
-  // equipment's required airflow. Renders nothing until the user has set a
-  // return-air mode in Fine-tune inputs.
+  // equipment's required airflow. Renders nothing until the user has entered
+  // a return-air mode in the final recommendation section below.
   function returnAirCard() {
     var check = state.result && state.result.returnAir;
     if (!check) return "";
@@ -681,10 +682,80 @@
         '<p class="pq-disc">' + escapeHtml(check.disclosure) + '</p>' +
       '</div>';
   }
-  function wireReturnAir() {
-    // Pure display card for now — no click handlers of its own. Present for
-    // symmetry with wirePhotos()/wirePermit() and as a hook for future
-    // interactivity (e.g. a "learn more" toggle).
+
+  // Return-air input widget: mode select + duct-diameter or grille-W/H fields,
+  // plus its own "Check" button. Deliberately separate from the main
+  // Recalculate flow in adjustBlock() — returnAirCheck() is validation-only
+  // (see loadcalc.js) and never changes the load numbers, so checking it
+  // shouldn't require re-running the whole calculation.
+  function returnAirInputHtml(e) {
+    return '' +
+      '<div class="retair-input adjust">' +
+        '<label>Return duct or return grille size</label>' +
+        '<select id="inRetAirMode">' +
+          '<option value=""' + (!e.retAirMode ? " selected" : "") + '>Not specified</option>' +
+          opt("ducted", "Ducted return (has a return trunk)", e.retAirMode) +
+          opt("grille", "Direct return grille (no trunk)", e.retAirMode) +
+        '</select>' +
+        '<div id="retAirFields">' + retAirFieldsHtml(e.retAirMode, e) + '</div>' +
+        '<button class="recalc" id="checkRetAirBtn">Check return air</button>' +
+        '<p class="note" style="text-align:left;margin:8px 2px 0">Proper airflow needs about <b>144 sq in of return opening per ton</b> (a standard field rule) — too little and the system starves for air, runs inefficiently, and wears out early, no matter how correctly the equipment itself is sized.</p>' +
+      '</div>';
+  }
+
+  // ---------- Final recommendation (bottom of the results page) ----------
+  // The headline answer, in one place, sized for whatever equipment the
+  // homeowner ends up installing: fixed-capacity systems (single/two-stage)
+  // are sized differently than a heat pump's backup-heat tradeoff, and a
+  // variable-capacity system can legitimately come in smaller since it
+  // modulates instead of needing Manual S's fixed-capacity oversize cushion.
+  function finalRecommendationCard(r, e, c) {
+    var hp = r.heatpump;
+    var hpNote = hp.auxBtu > 500
+      ? 'covers this home down to about <b>' + hp.balanceF + '°F</b>; below that, plan on ≈<b>' + hp.auxKw + ' kW</b> (' + fmt(hp.auxBtu) + ' BTU/h) of backup heat at the ' + c.heating99 + '°F design low.'
+      : 'covers this home alone all the way to the ' + c.heating99 + '°F design low — no backup heat needed.';
+    return '' +
+      '<div class="final-rec">' +
+        '<div class="final-rec-head">LoadMaster Pro AI recommends a</div>' +
+        '<div class="final-rec-tons">' + r.recommendedTons + '<span>-ton system</span></div>' +
+        '<p class="final-rec-sub">for this home\'s ' + fmt(r.cooling.total) + ' BTU/h design cooling load. The right number below depends on which kind of system actually goes in the house:</p>' +
+        '<div class="final-rec-grid">' +
+          '<div class="final-rec-row"><span>Single-stage A/C or gas furnace split system</span><b>' + r.sizing.single + ' tons</b></div>' +
+          '<div class="final-rec-row"><span>Two-stage system</span><b>' + r.sizing.two + ' tons</b></div>' +
+          '<div class="final-rec-row"><span>Variable-capacity (inverter) system</span><b>' + r.sizing.variable + ' tons</b></div>' +
+          '<div class="final-rec-row hp"><span>Heat pump (any stage)</span><b>' + r.recommendedTons + ' tons*</b></div>' +
+        '</div>' +
+        '<p class="final-rec-foot">Variable-capacity systems modulate continuously instead of needing Manual S\'s fixed-capacity oversize cushion, so they\'re picked closer to the exact load — often a half-ton smaller than single/two-stage equipment, though which side of a half-ton step the exact load falls on can occasionally push it the other way. *A heat pump uses the same cooling-capacity sizing rule as an A/C — size it for the stage type above, then check the heating side: this ' + r.recommendedTons + '-ton heat pump ' + hpNote + '</p>' +
+        returnAirInputHtml(e) +
+        returnAirCard() +
+      '</div>';
+  }
+
+  function wireFinalRec() {
+    // Swap the return-air field(s) (duct diameter vs. grille width/height)
+    // the instant the mode changes, without requiring a check click.
+    var retModeSel = $("#inRetAirMode");
+    if (retModeSel) {
+      retModeSel.addEventListener("change", function () {
+        var wrap = $("#retAirFields");
+        if (wrap) wrap.innerHTML = retAirFieldsHtml(retModeSel.value, state.effective);
+      });
+    }
+    var checkBtn = $("#checkRetAirBtn");
+    if (checkBtn) checkBtn.addEventListener("click", function () {
+      var retModeEl = $("#inRetAirMode");
+      state.overrides.retAirMode = retModeEl && retModeEl.value ? retModeEl.value : undefined;
+      var retDuctEl = $("#inRetAirDuctIn"); var retDuctVal = retDuctEl ? parseFloat(retDuctEl.value) : NaN;
+      state.overrides.retAirDuctIn = isFinite(retDuctVal) && retDuctVal > 0 ? retDuctVal : undefined;
+      var retGWEl = $("#inRetAirGrilleW"); var retGWVal = retGWEl ? parseFloat(retGWEl.value) : NaN;
+      state.overrides.retAirGrilleW = isFinite(retGWVal) && retGWVal > 0 ? retGWVal : undefined;
+      var retGHEl = $("#inRetAirGrilleH"); var retGHVal = retGHEl ? parseFloat(retGHEl.value) : NaN;
+      state.overrides.retAirGrilleH = isFinite(retGHVal) && retGHVal > 0 ? retGHVal : undefined;
+      compute();   // validation-only field: recomputes returnAir, load numbers are unchanged
+      render();
+      var card = $(".retair-card");
+      if (card) card.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
   }
   function returnAirIcon() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h13"/><path d="M12 7l5 5-5 5"/><path d="M21 5v14"/></svg>'; }
 
@@ -798,13 +869,7 @@
                 opt("sealed", "Sealed &amp; insulated", e.ductCondition) + opt("unsealed", "Unsealed / uninsulated", e.ductCondition) +
               '</select></div>' +
           '</div>' +
-          '<label>Return air</label>' +
-          '<select id="inRetAirMode">' +
-            '<option value=""' + (!e.retAirMode ? " selected" : "") + '>Not specified</option>' +
-            opt("ducted", "Ducted return (has a return trunk)", e.retAirMode) +
-            opt("grille", "Direct return grille (no trunk)", e.retAirMode) +
-          '</select>' +
-          '<div id="retAirFields">' + retAirFieldsHtml(e.retAirMode, e) + '</div>' +
+          '<p class="note" style="text-align:left;margin:10px 2px 0">Return duct/grille sizing has its own check at the bottom of the page — it\'s a separate, instant check that doesn\'t need a full recalculate.</p>' +
           '<button class="recalc" id="recalcBtn">Recalculate</button>' +
         '</div>' +
       '</details>';
@@ -850,15 +915,6 @@
         if (wrap) wrap.style.display = ductTypeSel.value === "ductless" ? "none" : "";
       });
     }
-    // Swap the return-air field(s) (duct diameter vs. grille width/height)
-    // the instant the mode changes, without requiring a Recalculate click.
-    var retModeSel = $("#inRetAirMode");
-    if (retModeSel) {
-      retModeSel.addEventListener("change", function () {
-        var wrap = $("#retAirFields");
-        if (wrap) wrap.innerHTML = retAirFieldsHtml(retModeSel.value, state.effective);
-      });
-    }
     var rb = $("#recalcBtn");
     if (rb) rb.addEventListener("click", function () {
       var area = parseFloat($("#inArea").value);
@@ -890,14 +946,11 @@
       state.overrides.ductType = ductTypeEl && ductTypeEl.value ? ductTypeEl.value : undefined;
       var ductCondEl = $("#inDuctCondition");
       state.overrides.ductCondition = ductCondEl && ductCondEl.value ? ductCondEl.value : undefined;
-      var retModeEl = $("#inRetAirMode");
-      state.overrides.retAirMode = retModeEl && retModeEl.value ? retModeEl.value : undefined;
-      var retDuctEl = $("#inRetAirDuctIn"); var retDuctVal = retDuctEl ? parseFloat(retDuctEl.value) : NaN;
-      state.overrides.retAirDuctIn = isFinite(retDuctVal) && retDuctVal > 0 ? retDuctVal : undefined;
-      var retGWEl = $("#inRetAirGrilleW"); var retGWVal = retGWEl ? parseFloat(retGWEl.value) : NaN;
-      state.overrides.retAirGrilleW = isFinite(retGWVal) && retGWVal > 0 ? retGWVal : undefined;
-      var retGHEl = $("#inRetAirGrilleH"); var retGHVal = retGHEl ? parseFloat(retGHEl.value) : NaN;
-      state.overrides.retAirGrilleH = isFinite(retGHVal) && retGHVal > 0 ? retGHVal : undefined;
+      // Return-air fields are NOT read here — they live in the final
+      // recommendation section's own instant check (wireFinalRec), which
+      // writes the same state.overrides.retAir* keys without requiring a
+      // full Recalculate (the return-air check is validation-only and
+      // never feeds back into the load numbers, so it doesn't need one).
 
       // Keep displaying as a user-adjusted estimate.
       state.property.source = "estimate";
@@ -1053,6 +1106,12 @@
           '<div class="rp-res cool"><span>Cooling load</span><b>' + fmt(r.cooling.total) + '</b><em>BTU/h · ' + r.recommendedTons + ' tons · expected ' + fmt(r.cooling.range.low) + '–' + fmt(r.cooling.range.high) + '</em></div>' +
         '</div>' +
         '<div class="rp-equip"><b>Equipment plan:</b> ' + r.recommendedTons + '-ton cooling (' + fmt(r.equipment.acBtu) + ' BTU/h) at ≈' + fmt(r.equipment.airflowCfm) + ' CFM; heating via ' + fmt(r.equipment.furnaceOutput) + ' BTU/h-output furnace or heat pump. Heat-pump balance point ≈ <b>' + r.heatpump.balanceF + '°F</b>' + (r.heatpump.auxBtu > 500 ? ' with ≈' + r.heatpump.auxKw + ' kW backup at design' : ' — no backup needed at design') + '. ' + r.equipment.suggestion + '</div>' +
+        '<div class="rp-block rp-final-rec"><h2>Final recommendation — by system type</h2><table>' +
+          rrow("Single-stage A/C or gas furnace split system", r.sizing.single + " tons") +
+          rrow("Two-stage system", r.sizing.two + " tons") +
+          rrow("Variable-capacity (inverter) system", r.sizing.variable + " tons") +
+          rrow("Heat pump (any stage)", r.recommendedTons + " tons") +
+        '</table><p class="rp-disc" style="margin-top:6px">Variable-capacity systems modulate continuously instead of needing Manual S\'s fixed-capacity oversize cushion, so they\'re picked closer to the exact load — often a half-ton smaller than single/two-stage equipment, though which side of a half-ton step the exact load falls on can occasionally push it the other way. A heat pump follows the same cooling-capacity rule as an A/C for the stage type chosen — see the balance point above for its heating-side backup requirement.</p></div>' +
         '<div class="rp-cols">' +
           '<div class="rp-block"><h2>Design conditions</h2><table>' +
             rrow("Climate source", c.source === "live" ? "Site analysis — " + fmt(c.hours) + " hrs of hourly weather" : "Nearest station: " + escapeHtml(c.city)) +
