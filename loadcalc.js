@@ -143,6 +143,87 @@
     return n;
   }
 
+  /*
+   * Manual S fit check: does the selected nominal size actually land inside
+   * the allowed percent-of-load band, and if not, why?
+   *
+   * Residential equipment only exists in half-ton steps with a 1-ton floor,
+   * so for some small loads NO available size lands in the band (e.g. a
+   * 1.2-ton load: 1.0 ton is 83% of load — under the 90% floor — while 1.5
+   * tons is 125%, over the fixed-capacity ceiling). Silently printing a
+   * number that's 125% of load as though it were a clean Manual S selection
+   * overstates the precision available; this reports the real fit so the
+   * contractor can see it and judge.
+   */
+  function manualSFit(selectedTons, loadTons, type) {
+    if (!(loadTons > 0)) return null;
+    var pct = selectedTons / loadTons;
+    var ceiling = type === "variable" ? 1.15 : MANUAL_S_MAX_FRACTION;
+    var inBand = pct >= MANUAL_S_MIN_FRACTION - 1e-9 && pct <= ceiling + 1e-9;
+    var pctLabel = Math.round(pct * 100);
+    var msg;
+    if (inBand) {
+      msg = "In band — " + pctLabel + "% of the calculated load (Manual S target: " +
+            Math.round(MANUAL_S_MIN_FRACTION * 100) + "–" + Math.round(ceiling * 100) + "%).";
+    } else if (pct > ceiling) {
+      msg = "Closest available size is " + pctLabel + "% of the calculated load, above the " +
+            Math.round(ceiling * 100) + "% Manual S target. Equipment only comes in half-ton steps " +
+            "(1-ton minimum), so no smaller size clears the 90% floor for this load. Expect shorter " +
+            "run cycles; a variable-capacity unit handles this gap better than fixed capacity.";
+    } else {
+      msg = "Closest available size is " + pctLabel + "% of the calculated load, below the " +
+            Math.round(MANUAL_S_MIN_FRACTION * 100) + "% Manual S floor — verify the inputs before sizing this small.";
+    }
+    return { pctOfLoad: pctLabel, inBand: inBand, message: msg };
+  }
+
+  /*
+   * Sensible Heat Ratio check — a real Manual S selection criterion this
+   * engine had the inputs for but never evaluated.
+   *
+   * Manual S requires the selected equipment to cover the sensible AND the
+   * latent load separately, not just the total. A home whose load is
+   * latent-heavy (low required SHR) will feel clammy on a unit that only
+   * matches the total, because typical residential equipment removes
+   * moisture at roughly SHR 0.75–0.80 at design conditions. Reporting the
+   * required SHR lets the contractor pick a coil that actually matches.
+   */
+  const TYPICAL_EQUIP_SHR_LOW = 0.75;   // standard residential equipment floor
+  const TYPICAL_EQUIP_SHR_HIGH = 0.80;  // standard residential equipment ceiling
+
+  function shrCheck(sensibleBtu, latentBtu) {
+    var total = sensibleBtu + latentBtu;
+    if (!(total > 0)) return null;
+    var shr = sensibleBtu / total;
+    var rounded = Math.round(shr * 100) / 100;
+    var level, message;
+    if (shr < TYPICAL_EQUIP_SHR_LOW) {
+      level = "high-latent";
+      message = "This home's load is moisture-heavy (required SHR " + rounded.toFixed(2) +
+        ", below the ~0.75–0.80 that standard equipment delivers). Sizing on total capacity alone " +
+        "will leave it cool but clammy. Select a coil rated for enhanced dehumidification, or a " +
+        "variable-capacity system with a dehumidification mode — and confirm latent capacity at " +
+        "design conditions from the manufacturer's expanded performance data.";
+    } else if (shr > TYPICAL_EQUIP_SHR_HIGH) {
+      level = "high-sensible";
+      message = "This home's load is almost entirely sensible heat (required SHR " + rounded.toFixed(2) +
+        ", above the ~0.75–0.80 typical of standard equipment). Favor a high-SHR/dry-climate coil; " +
+        "an aggressive dehumidification setup would be wasted capacity here.";
+    } else {
+      level = "typical";
+      message = "Required SHR " + rounded.toFixed(2) + " sits in the ~0.75–0.80 range standard " +
+        "residential equipment delivers, so a conventional coil should cover both the sensible and " +
+        "latent halves of this load.";
+    }
+    return {
+      shr: rounded,
+      sensiblePct: Math.round(shr * 100),
+      latentPct: Math.round((1 - shr) * 100),
+      level: level,
+      message: message
+    };
+  }
+
   // Heat-pump capacity retention at 17°F vs 47°F rating, by system type.
   // Standard single/two-stage ASHPs hold ~60%; inverter-driven and
   // cold-climate units hold far more.
@@ -384,7 +465,8 @@
       oversizePct: Math.round(recommendedTons / tons * 100),
       airflowCfm: Math.round(recommendedTons * 400 / 25) * 25,
       furnaceOutput: furnaceOut,
-      suggestion: systemSuggestion(heating99)
+      suggestion: systemSuggestion(heating99),
+      manualSFit: manualSFit(recommendedTons, tons, o.systemType)
     };
 
     const hp = balancePoint(recommendedTons, heating, o.indoorHeat, heating99, o.systemType);
@@ -415,6 +497,10 @@
       },
       tons: Math.round(tons * 100) / 100,
       recommendedTons: recommendedTons,
+      // Sensible/latent balance check — see shrCheck(). Uses the raw (pre-duct)
+      // split; the duct factor scales both halves equally so the ratio is
+      // identical either way.
+      shr: shrCheck(sensible, latent),
       sizing: sizing,
       sqftPerTon: Math.round(o.area / recommendedTons),
       equipment: equipment,
@@ -422,7 +508,7 @@
     };
   }
 
-  const api = { compute, qualityFromYear, airFactor, balancePoint, sizeFor, resolveDuctFactor, returnAirCheck, QUALITY, DEFAULTS };
+  const api = { compute, qualityFromYear, airFactor, balancePoint, sizeFor, manualSFit, shrCheck, resolveDuctFactor, returnAirCheck, QUALITY, DEFAULTS };
   root.LoadCalc = api;
   if (typeof module !== "undefined" && module.exports) {
     module.exports = api;

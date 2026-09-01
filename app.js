@@ -770,10 +770,32 @@
           '<div class="final-rec-row"><span>Variable-capacity (inverter) system</span><b>' + r.sizing.variable + ' tons</b></div>' +
           '<div class="final-rec-row hp"><span>Heat pump (any stage)</span><b>' + r.recommendedTons + ' tons*</b></div>' +
         '</div>' +
+        manualSFitNote(r) +
+        shrNote(r) +
         '<p class="final-rec-foot">Variable-capacity systems modulate continuously, and their maximum output typically exceeds their nominal rating, so they don\'t need the fixed-capacity oversize cushion — they\'re selected to the nearest half-ton step, which is often a half-ton smaller than single/two-stage equipment for the same load and never larger. Every size above stays at or above Manual S\'s 90%-of-load floor. *A heat pump uses the same cooling-capacity sizing rule as an A/C — size it for the stage type above, then check the heating side: this ' + r.recommendedTons + '-ton heat pump ' + hpNote + '</p>' +
         returnAirInputHtml(e) +
         returnAirCard(e) +
       '</div>';
+  }
+
+  // Manual S fit: only shown when the closest available equipment size can't
+  // land inside the allowed percent-of-load band, since that's the case where
+  // the headline tonnage needs a caveat to be honest.
+  function manualSFitNote(r) {
+    var fit = r.equipment && r.equipment.manualSFit;
+    if (!fit || fit.inBand) return "";
+    return '<p class="fit-note">⚠ <b>Closest size, not an exact fit.</b> ' + escapeHtml(fit.message) + '</p>';
+  }
+
+  // Sensible/latent balance (Manual S SHR check) — always shown, because
+  // "which coil" is as much a part of the answer as "how many tons".
+  function shrNote(r) {
+    var s = r.shr;
+    if (!s) return "";
+    var cls = s.level === "typical" ? "shr-note" : "shr-note flag";
+    var head = { "high-latent": "Moisture-heavy load", "high-sensible": "Dry, sensible-heavy load", typical: "Balanced load" }[s.level] || "Load balance";
+    return '<p class="' + cls + '"><b>' + head + ' — ' + s.sensiblePct + '% sensible / ' + s.latentPct + '% latent (SHR ' + s.shr.toFixed(2) + ').</b> ' +
+      escapeHtml(s.message) + '</p>';
   }
 
   function wireFinalRec() {
@@ -1166,7 +1188,12 @@
           rrow("Two-stage system", r.sizing.two + " tons") +
           rrow("Variable-capacity (inverter) system", r.sizing.variable + " tons") +
           rrow("Heat pump (any stage)", r.recommendedTons + " tons") +
-        '</table><p class="rp-disc" style="margin-top:6px">Variable-capacity systems modulate continuously, and their maximum output typically exceeds their nominal rating, so they don\'t need the fixed-capacity oversize cushion — they\'re selected to the nearest half-ton step, which is often a half-ton smaller than single/two-stage equipment for the same load and never larger. Every size listed stays at or above Manual S\'s 90%-of-load floor. A heat pump follows the same cooling-capacity rule as an A/C for the stage type chosen — see the balance point above for its heating-side backup requirement.</p></div>' +
+          rrow("Sensible / latent split", r.shr ? r.shr.sensiblePct + "% / " + r.shr.latentPct + "% (SHR " + r.shr.shr.toFixed(2) + ")" : "—") +
+          rrow("Selected size vs. calculated load", r.equipment.manualSFit ? r.equipment.manualSFit.pctOfLoad + "% (" + (r.equipment.manualSFit.inBand ? "within Manual S band" : "closest available size — outside band") + ")" : "—") +
+        '</table>' +
+        (r.shr ? '<p class="rp-permit-note">' + escapeHtml(r.shr.message) + '</p>' : "") +
+        (r.equipment.manualSFit && !r.equipment.manualSFit.inBand ? '<p class="rp-permit-note">' + escapeHtml(r.equipment.manualSFit.message) + '</p>' : "") +
+        '<p class="rp-disc" style="margin-top:6px">Variable-capacity systems modulate continuously, and their maximum output typically exceeds their nominal rating, so they don\'t need the fixed-capacity oversize cushion — they\'re selected to the nearest half-ton step, which is often a half-ton smaller than single/two-stage equipment for the same load and never larger. Every size listed stays at or above Manual S\'s 90%-of-load floor. A heat pump follows the same cooling-capacity rule as an A/C for the stage type chosen — see the balance point above for its heating-side backup requirement.</p></div>' +
         '<div class="rp-cols">' +
           '<div class="rp-block"><h2>Design conditions</h2><table>' +
             rrow("Climate source", c.source === "live" ? "Site analysis — " + fmt(c.hours) + " hrs of hourly weather" : "Nearest station: " + escapeHtml(c.city)) +

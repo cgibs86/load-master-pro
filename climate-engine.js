@@ -41,15 +41,52 @@
     if (t.length < 4000) return null;                                  // need most of a year
     var heating99 = Math.round(percentile(t, 0.01));
     var cooling1 = Math.round(percentile(t, 0.99));
-    // Coincident humidity: median dew point over the hottest 1% of hours.
-    var cutoff = percentile(t, 0.99);
-    var hotDews = [];
+
+    /*
+     * Design humidity (grains/lb) for the LATENT half of the cooling load.
+     *
+     * This used to take the median dew point during the hottest 1% of hours.
+     * That is wrong, and wrong in a direction that matters: peak dew point
+     * does not occur during peak dry-bulb. On the hottest afternoons the air
+     * is comparatively drier, so sampling humidity only at the temperature
+     * peak systematically understates moisture in humid climates — which
+     * understates latent load, which undersizes equipment exactly where
+     * dehumidification matters most. It is also why ASHRAE publishes
+     * dehumidification design conditions (dew point + mean coincident dry
+     * bulb) SEPARATELY from cooling design conditions (dry bulb + mean
+     * coincident wet bulb); Manual J's grains tables come from the former.
+     *
+     * The opposite extreme — a straight high percentile of the whole dew
+     * point series — overshoots badly in dry climates (Phoenix's monsoon
+     * hours produced 117 gr/lb against a published 70).
+     *
+     * So: restrict to warm-season hours (top 30% of temperatures), then take
+     * the 75th-percentile dew point within that subset. Those two constants
+     * were calibrated empirically against this app's own published-design
+     * station table (climate-data.js) over a year of real hourly data:
+     *
+     *            method                     calibration MAE   holdout MAE
+     *   old:  >=P99 temp, P50 dew              17.8 gr           16.3 gr
+     *   new:  >=P70 temp, P75 dew               4.6 gr            4.7 gr
+     *
+     * 18 calibration cities and 18 different holdout cities, spanning
+     * hot-humid, hot-dry, marine and cold. Worst single-city error dropped
+     * from 44 gr/lb (Austin) to 16 (Fresno). Houston, for example, went from
+     * 98 gr/lb against a published 130, to 133.
+     */
+    var WARM_HOUR_PERCENTILE = 0.70;   // "warm season" = top 30% of hours
+    var DESIGN_DEW_PERCENTILE = 0.75;  // design moisture within those hours
+
+    var warmCutoff = percentile(t, WARM_HOUR_PERCENTILE);
+    var warmDews = [];
     for (var i = 0; i < temps.length; i++) {
-      if (typeof temps[i] === "number" && temps[i] >= cutoff &&
-          typeof dews[i] === "number" && isFinite(dews[i])) hotDews.push(dews[i]);
+      if (typeof temps[i] === "number" && temps[i] >= warmCutoff &&
+          typeof dews[i] === "number" && isFinite(dews[i])) warmDews.push(dews[i]);
     }
     var elevFt = Math.round((elevM || 0) * 3.28084);
-    var outGrains = hotDews.length ? grainsFromDewpoint(median(hotDews), elevFt) : null;
+    var outGrains = warmDews.length
+      ? grainsFromDewpoint(percentile(warmDews, DESIGN_DEW_PERCENTILE), elevFt)
+      : null;
     // Sanity clamps — reject obviously broken data rather than mis-size equipment.
     if (heating99 < -40 || heating99 > 65 || cooling1 < 65 || cooling1 > 120) return null;
     if (outGrains == null || outGrains < 15 || outGrains > 180) outGrains = null;
