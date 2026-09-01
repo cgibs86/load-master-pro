@@ -770,7 +770,7 @@
           '<div class="final-rec-row"><span>Variable-capacity (inverter) system</span><b>' + r.sizing.variable + ' tons</b></div>' +
           '<div class="final-rec-row hp"><span>Heat pump (any stage)</span><b>' + r.recommendedTons + ' tons*</b></div>' +
         '</div>' +
-        '<p class="final-rec-foot">Variable-capacity systems modulate continuously instead of needing Manual S\'s fixed-capacity oversize cushion, so they\'re picked closer to the exact load — often a half-ton smaller than single/two-stage equipment, though which side of a half-ton step the exact load falls on can occasionally push it the other way. *A heat pump uses the same cooling-capacity sizing rule as an A/C — size it for the stage type above, then check the heating side: this ' + r.recommendedTons + '-ton heat pump ' + hpNote + '</p>' +
+        '<p class="final-rec-foot">Variable-capacity systems modulate continuously, and their maximum output typically exceeds their nominal rating, so they don\'t need the fixed-capacity oversize cushion — they\'re selected to the nearest half-ton step, which is often a half-ton smaller than single/two-stage equipment for the same load and never larger. Every size above stays at or above Manual S\'s 90%-of-load floor. *A heat pump uses the same cooling-capacity sizing rule as an A/C — size it for the stage type above, then check the heating side: this ' + r.recommendedTons + '-ton heat pump ' + hpNote + '</p>' +
         returnAirInputHtml(e) +
         returnAirCard(e) +
       '</div>';
@@ -1166,7 +1166,7 @@
           rrow("Two-stage system", r.sizing.two + " tons") +
           rrow("Variable-capacity (inverter) system", r.sizing.variable + " tons") +
           rrow("Heat pump (any stage)", r.recommendedTons + " tons") +
-        '</table><p class="rp-disc" style="margin-top:6px">Variable-capacity systems modulate continuously instead of needing Manual S\'s fixed-capacity oversize cushion, so they\'re picked closer to the exact load — often a half-ton smaller than single/two-stage equipment, though which side of a half-ton step the exact load falls on can occasionally push it the other way. A heat pump follows the same cooling-capacity rule as an A/C for the stage type chosen — see the balance point above for its heating-side backup requirement.</p></div>' +
+        '</table><p class="rp-disc" style="margin-top:6px">Variable-capacity systems modulate continuously, and their maximum output typically exceeds their nominal rating, so they don\'t need the fixed-capacity oversize cushion — they\'re selected to the nearest half-ton step, which is often a half-ton smaller than single/two-stage equipment for the same load and never larger. Every size listed stays at or above Manual S\'s 90%-of-load floor. A heat pump follows the same cooling-capacity rule as an A/C for the stage type chosen — see the balance point above for its heating-side backup requirement.</p></div>' +
         '<div class="rp-cols">' +
           '<div class="rp-block"><h2>Design conditions</h2><table>' +
             rrow("Climate source", c.source === "live" ? "Site analysis — " + fmt(c.hours) + " hrs of hourly weather" : "Nearest station: " + escapeHtml(c.city)) +

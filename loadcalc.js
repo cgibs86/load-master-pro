@@ -101,21 +101,44 @@
 
   /*
    * Manual S-style equipment selection from the exact cooling load (tons).
-   * Fixed-capacity equipment comes in half-ton steps; ACCA Manual S allows
-   * roughly 90%–115% of the calculated total load for single/two-stage
-   * cooling. Variable-capacity (inverter) systems modulate (typically down
-   * to ~30-40% of nominal), so they're selected at-or-just-above the load
-   * without the oversize penalty — often a half-ton smaller than the
-   * "round up to be safe" habit.
+   *
+   * Fixed capacity (single/two-stage): equipment comes in half-ton steps and
+   * cannot modulate, so the pick is the smallest step at or above the load,
+   * stepped back down when that lands beyond ~115% of load and the smaller
+   * step still covers Manual S's 90% floor.
+   *
+   * Variable capacity (inverter): the compressor modulates continuously
+   * (typically down to ~25-40% of nominal) AND its maximum output generally
+   * exceeds its nominal rating, so it does NOT need the fixed-capacity
+   * "round up to be safe" cushion — it is selected to the NEAREST half-ton
+   * step, which is often a half-ton smaller than the fixed-capacity pick and
+   * must never be larger than it. The 90%-of-load floor still applies so a
+   * round-down can't grossly undersize.
+   *
+   * (Before this was fixed, `variable` always rounded up and never stepped
+   * down, so at loads like 1.55 / 2.05 / 2.55 tons it returned a size a half
+   * ton LARGER than single-stage — the exact inverse of the intended
+   * behavior, and visible to users on the results page.)
    */
+  var MANUAL_S_MIN_FRACTION = 0.90;   // never select below 90% of calculated load
+  var MANUAL_S_MAX_FRACTION = 1.15;   // fixed-capacity upper band before stepping down
+
   function sizeFor(loadTons, type) {
     var t = Math.max(0.75, loadTons);
     var up = Math.ceil(t * 2 - 1e-9) / 2;            // smallest half-ton ≥ load
-    if (type === "variable") return Math.max(1, up);
+
+    if (type === "variable") {
+      var near = Math.max(1, Math.round(t * 2) / 2);  // nearest half-ton step
+      // A round-down must still clear the 90% floor; if it doesn't, take the
+      // step above (which is `up` by construction, since near = up - 0.5 there).
+      if (near < MANUAL_S_MIN_FRACTION * t) near = Math.max(1, up);
+      return near;
+    }
+
     var n = Math.max(1, up);
-    if (n > 1.15 * t) {                               // >115% oversized —
+    if (n > MANUAL_S_MAX_FRACTION * t) {              // >115% oversized —
       var dn = n - 0.5;                               // step down if ≥90% holds
-      if (dn >= 0.9 * t && dn >= 1) n = dn;
+      if (dn >= MANUAL_S_MIN_FRACTION * t && dn >= 1) n = dn;
     }
     return n;
   }

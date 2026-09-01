@@ -178,6 +178,73 @@ function checkTrue(label, ok, detail) {
   );
 }
 
+console.log("\n=== Manual S equipment selection: sizeFor() across the full load range ===");
+/*
+ * Regression guard for a real, user-reported defect: variable-capacity
+ * (inverter) equipment was being selected a HALF TON LARGER than single/
+ * two-stage equipment at common loads (1.05-1.10, 1.55-1.65, 2.05-2.15,
+ * 2.55-2.60 tons, ...), because sizeFor() rounded `variable` up to the next
+ * half-ton and never applied the step-down that fixed-capacity types get --
+ * the exact inverse of both the intended behavior and the code's own comment.
+ *
+ * The three invariants below are what "correct" means here:
+ *   1. Variable capacity is NEVER larger than the fixed-capacity pick for the
+ *      same load (it modulates, and its max output exceeds nominal, so it
+ *      needs no oversize cushion).
+ *   2. No selection of any type ever falls below Manual S's 90%-of-load floor
+ *      (above the 1-ton minimum equipment size, which floors everything).
+ *   3. Variable capacity is strictly SMALLER than fixed for at least some
+ *      loads -- otherwise "picked closer to the exact load" is a claim the
+ *      product makes on screen but the engine never actually delivers.
+ */
+{
+  let inversions = 0, floorBreaches = 0, strictlySmaller = 0, checked = 0;
+  const inversionExamples = [], floorExamples = [];
+  for (let i = 18; i <= 200; i++) {            // 0.90 .. 10.00 tons, 0.05 steps
+    const t = i / 20;
+    const single = LoadCalc.sizeFor(t, "single");
+    const two = LoadCalc.sizeFor(t, "two");
+    const variable = LoadCalc.sizeFor(t, "variable");
+    checked++;
+    if (variable > single || variable > two) {
+      inversions++;
+      if (inversionExamples.length < 4) inversionExamples.push(`${t}t -> single ${single} / variable ${variable}`);
+    }
+    if (variable < single) strictlySmaller++;
+    for (const [label, n] of [["single", single], ["two", two], ["variable", variable]]) {
+      if (n > 1 && n < 0.9 * t - 1e-9) {
+        floorBreaches++;
+        if (floorExamples.length < 4) floorExamples.push(`${label} ${n}t for a ${t}t load (${Math.round(n / t * 100)}%)`);
+      }
+    }
+  }
+  checkTrue(
+    "variable-capacity is never sized larger than fixed-capacity for the same load",
+    inversions === 0,
+    inversions === 0 ? `${checked} loads checked, 0 inversions` : `${inversions} inversions, e.g. ${inversionExamples.join("; ")}`
+  );
+  checkTrue(
+    "no selection falls below the Manual S 90%-of-load floor",
+    floorBreaches === 0,
+    floorBreaches === 0 ? `${checked} loads checked, 0 breaches` : `${floorBreaches} breaches, e.g. ${floorExamples.join("; ")}`
+  );
+  checkTrue(
+    "variable-capacity actually lands a size smaller than fixed on some loads (the on-screen claim is real)",
+    strictlySmaller > 0,
+    `${strictlySmaller}/${checked} loads select a smaller variable-capacity unit`
+  );
+
+  // The specific loads the user reported as wrong, pinned so they can't regress.
+  const regressed = [1.05, 1.10, 1.55, 1.60, 1.65, 2.05, 2.10, 2.15, 2.55, 2.60]
+    .filter((t) => LoadCalc.sizeFor(t, "variable") > LoadCalc.sizeFor(t, "single"));
+  checkTrue(
+    "the exact loads reported as mis-sized now select correctly",
+    regressed.length === 0,
+    regressed.length === 0 ? "all 10 previously-inverted loads fixed" : `still inverted at ${regressed.join(", ")}t`
+  );
+}
+console.log("");
+
 console.log("\n=== Full-spec published Manual J case studies (windowU/windowSHGC/ach overrides) ===");
 /*
  * Burdick, A. (IBACOS), "Strategy Guideline: Accurate Heating and Cooling
