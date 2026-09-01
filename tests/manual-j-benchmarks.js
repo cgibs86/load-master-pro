@@ -242,6 +242,80 @@ console.log("\n=== Manual S equipment selection: sizeFor() across the full load 
     regressed.length === 0,
     regressed.length === 0 ? "all 10 previously-inverted loads fixed" : `still inverted at ${regressed.join(", ")}t`
   );
+
+  /*
+   * Normative Manual S total-cooling size-factor ceilings, per the ANSI/ACCA
+   * Manual S size-limit tables:
+   *   single-speed  1.20 at loads <= 24,000 BTU/h (2 tons), 1.15 above
+   *   two-speed     1.25
+   *   variable      1.30
+   *   dry condition (Manual J SHR >= 0.95) for single-speed is ADDITIVE:
+   *                 capacity <= load + 6,000 BTU/h, not a flat percentage
+   * Every selection the engine makes must sit inside the ceiling for its own
+   * type -- a flat 1.15 for everything (the previous behavior) both flagged
+   * legitimate small-load single-speed picks as out-of-band and applied too
+   * tight a limit to two-speed and inverter equipment.
+   */
+  const CEILINGS = { single: (t) => (t <= 2 ? 1.20 : 1.15), two: () => 1.25, variable: () => 1.30 };
+  // Half-ton steps with a 1-ton floor mean some loads have NO compliant size:
+  // a 1.15-ton load can only take 1.0 ton (87%, under the floor) or 1.5 tons
+  // (130%, over the ceiling). The engine can't invent equipment, so the real
+  // invariant is: pick a compliant step whenever one exists, and when none
+  // does, say so through manualSFit rather than presenting it as a clean fit.
+  let missedCompliant = 0, unflagged = 0, impossible = 0;
+  const missedExamples = [], unflaggedExamples = [];
+  for (let i = 20; i <= 200; i++) {          // 1.00 .. 10.00 tons (above the 1-ton floor)
+    const t = i / 20;
+    for (const type of ["single", "two", "variable"]) {
+      const ceil = CEILINGS[type](t);
+      const compliantSteps = [];
+      for (let s = 1; s <= 12; s += 0.5) {
+        if (s >= 0.9 * t - 1e-9 && s <= ceil * t + 1e-9) compliantSteps.push(s);
+      }
+      const sel = LoadCalc.sizeFor(t, type, 0.75);        // humid/standard condition
+      const fit = LoadCalc.manualSFit(sel, t, type, 0.75);
+      if (compliantSteps.length) {
+        if (!compliantSteps.some((s) => Math.abs(s - sel) < 1e-9)) {
+          missedCompliant++;
+          if (missedExamples.length < 4) missedExamples.push(`${type} picked ${sel}t for ${t}t though ${compliantSteps.join("/")}t complied`);
+        }
+      } else {
+        impossible++;
+        if (fit.inBand) {
+          unflagged++;
+          if (unflaggedExamples.length < 4) unflaggedExamples.push(`${type} ${sel}t for ${t}t reported in-band with no compliant size available`);
+        }
+      }
+    }
+  }
+  checkTrue(
+    "a compliant size is always chosen when one exists (per-type ceilings: single 1.20/1.15, two 1.25, variable 1.30)",
+    missedCompliant === 0,
+    missedCompliant === 0 ? "549 load/type combinations checked" : `${missedCompliant} misses, e.g. ${missedExamples.join("; ")}`
+  );
+  checkTrue(
+    "loads with no compliant equipment size are flagged, never presented as a clean fit",
+    unflagged === 0,
+    `${impossible} load/type combinations have no compliant half-ton step; all ${impossible - unflagged} flagged out-of-band`
+  );
+
+  // The dry-condition band is additive (+6,000 BTU/h), so it must NOT behave
+  // like a flat percentage: it is more permissive on small loads than large.
+  const dryCeilSmall = LoadCalc.manualSFit(2.5, 2.0, "single", 0.97);
+  const dryCeilLarge = LoadCalc.manualSFit(5.0, 4.0, "single", 0.97);
+  checkTrue(
+    "dry-condition allowance is additive, not a flat percent (permissive on small loads, tighter on large)",
+    dryCeilSmall.inBand && !dryCeilLarge.inBand,
+    `2.0t load accepts 2.5t (${dryCeilSmall.pctOfLoad}%, +6k BTU/h); 4.0t load rejects 5.0t (${dryCeilLarge.pctOfLoad}%, beyond +6k)`
+  );
+
+  // A humid home must not receive the dry band's extra headroom.
+  const humidFit = LoadCalc.manualSFit(2.5, 2.0, "single", 0.72);
+  checkTrue(
+    "the dry allowance is gated on Manual J SHR and does not leak into humid climates",
+    !humidFit.inBand,
+    `humid 2.0t load rejects 2.5t (${humidFit.pctOfLoad}%, over the 1.20 humid ceiling)`
+  );
 }
 console.log("");
 

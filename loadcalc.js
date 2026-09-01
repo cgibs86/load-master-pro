@@ -120,10 +120,50 @@
    * ton LARGER than single-stage — the exact inverse of the intended
    * behavior, and visible to users on the results page.)
    */
-  var MANUAL_S_MIN_FRACTION = 0.90;   // never select below 90% of calculated load
-  var MANUAL_S_MAX_FRACTION = 1.15;   // fixed-capacity upper band before stepping down
+  var MANUAL_S_MIN_FRACTION = 0.90;   // total-cooling size factor floor, all types
 
-  function sizeFor(loadTons, type) {
+  /*
+   * Normative Manual S total-cooling size-factor ceilings (capacity ÷ load),
+   * from the ANSI/ACCA Manual S size-limit tables. These are LIMITS, not
+   * targets: the selection below still aims at the load and only consults a
+   * ceiling to decide whether the rounded-up step is too big.
+   *
+   *   Standard (humid/normal) sizing condition:
+   *     single-speed  ≤ 1.20 for loads ≤ 24,000 BTU/h, ≤ 1.15 above that
+   *     two-speed     ≤ 1.25
+   *     variable      ≤ 1.30
+   *   Dry sizing condition (gated on Manual J SHR ≥ 0.95):
+   *     single-speed  capacity ≤ load + 6,000 BTU/h — an ADDITIVE allowance,
+   *                   not a flat percentage (≈125% on a 2-ton load, only
+   *                   ≈112% on a 4-ton one), so it is modeled as +0.5 tons
+   *                   rather than a multiplier.
+   *
+   * Variable capacity gets the widest ceiling because it modulates, but a
+   * wider *limit* is not a reason to select a bigger unit — oversizing an
+   * inverter raises its minimum output until it can no longer turn down far
+   * enough, which is what Manual S's separate minimum-compressor rules
+   * guard against. So variable is still selected to the nearest step.
+   */
+  var MANUAL_S_SMALL_LOAD_TONS = 2;   // 24,000 BTU/h breakpoint for single-speed
+  var DRY_JSHR_THRESHOLD = 0.95;      // Manual J SHR at/above which the dry band applies
+  var DRY_ADDITIVE_TONS = 0.5;        // the +6,000 BTU/h dry allowance, in tons
+
+  // Upper size-factor limit for a given load/type/climate. jshr is the Manual J
+  // sensible heat ratio; omit it and the standard (humid) band is used, which
+  // is the conservative choice.
+  function manualSCeiling(loadTons, type, jshr) {
+    var isDry = typeof jshr === "number" && isFinite(jshr) && jshr >= DRY_JSHR_THRESHOLD;
+    if (type === "variable") return 1.30;
+    // Two-speed's dry-condition rule constrains the MINIMUM-compressor size
+    // factor (≤1.15), which needs manufacturer performance data this engine
+    // doesn't have; its total-capacity ceiling is 1.25 either way.
+    if (type === "two") return 1.25;
+    // single-speed
+    if (isDry) return (loadTons + DRY_ADDITIVE_TONS) / loadTons;   // additive, not a flat %
+    return loadTons <= MANUAL_S_SMALL_LOAD_TONS ? 1.20 : 1.15;
+  }
+
+  function sizeFor(loadTons, type, jshr) {
     var t = Math.max(0.75, loadTons);
     var up = Math.ceil(t * 2 - 1e-9) / 2;            // smallest half-ton ≥ load
 
@@ -135,9 +175,10 @@
       return near;
     }
 
+    var ceiling = manualSCeiling(t, type, jshr);
     var n = Math.max(1, up);
-    if (n > MANUAL_S_MAX_FRACTION * t) {              // >115% oversized —
-      var dn = n - 0.5;                               // step down if ≥90% holds
+    if (n > ceiling * t) {                            // beyond the type's ceiling —
+      var dn = n - 0.5;                               // step down if the 90% floor holds
       if (dn >= MANUAL_S_MIN_FRACTION * t && dn >= 1) n = dn;
     }
     return n;
@@ -155,10 +196,10 @@
    * overstates the precision available; this reports the real fit so the
    * contractor can see it and judge.
    */
-  function manualSFit(selectedTons, loadTons, type) {
+  function manualSFit(selectedTons, loadTons, type, jshr) {
     if (!(loadTons > 0)) return null;
     var pct = selectedTons / loadTons;
-    var ceiling = type === "variable" ? 1.15 : MANUAL_S_MAX_FRACTION;
+    var ceiling = manualSCeiling(loadTons, type, jshr);
     var inBand = pct >= MANUAL_S_MIN_FRACTION - 1e-9 && pct <= ceiling + 1e-9;
     var pctLabel = Math.round(pct * 100);
     var msg;
@@ -448,13 +489,17 @@
     const cooling = coolingRaw * ductFactor;
 
     const tons = cooling / 12000;
+    // Manual J sensible heat ratio — drives both the SHR guidance below and
+    // which Manual S size band applies (the dry band is gated on JSHR ≥ 0.95).
+    const shr = shrCheck(sensible, latent);
+    const jshr = shr ? shr.shr : null;
     // Manual S-style selection for the chosen system type, plus the
     // alternatives so the contractor can compare on the spot.
-    const recommendedTons = sizeFor(tons, o.systemType);
+    const recommendedTons = sizeFor(tons, o.systemType, jshr);
     const sizing = {
-      single: sizeFor(tons, "single"),
-      two: sizeFor(tons, "two"),
-      variable: sizeFor(tons, "variable")
+      single: sizeFor(tons, "single", jshr),
+      two: sizeFor(tons, "two", jshr),
+      variable: sizeFor(tons, "variable", jshr)
     };
 
     // ---------- Equipment plan ----------
@@ -466,7 +511,7 @@
       airflowCfm: Math.round(recommendedTons * 400 / 25) * 25,
       furnaceOutput: furnaceOut,
       suggestion: systemSuggestion(heating99),
-      manualSFit: manualSFit(recommendedTons, tons, o.systemType)
+      manualSFit: manualSFit(recommendedTons, tons, o.systemType, jshr)
     };
 
     const hp = balancePoint(recommendedTons, heating, o.indoorHeat, heating99, o.systemType);
@@ -500,7 +545,7 @@
       // Sensible/latent balance check — see shrCheck(). Uses the raw (pre-duct)
       // split; the duct factor scales both halves equally so the ratio is
       // identical either way.
-      shr: shrCheck(sensible, latent),
+      shr: shr,
       sizing: sizing,
       sqftPerTon: Math.round(o.area / recommendedTons),
       equipment: equipment,
