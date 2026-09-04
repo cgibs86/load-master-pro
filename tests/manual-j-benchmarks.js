@@ -392,5 +392,174 @@ console.log("\n=== Full-spec published Manual J case studies (windowU/windowSHGC
   );
 }
 
+console.log("\n=== EnvelopeIQ: vintage × climate-zone envelope defaults ===");
+{
+  const chi = climate("Chicago");
+  const base = {
+    area: 2000, quality: "average", foundation: "slab", sun: "average", bedrooms: 3,
+    heating99: chi.heating99, cooling1: chi.cooling1, outGrains: chi.outGrains, elevFt: 0, systemType: "single"
+  };
+
+  // 1. The regression pin: the table may only engage when BOTH the year built
+  // and the climate zone are known. Anything less falls back to the 3-tier
+  // quality bucket, bit for bit, so every benchmark above stays valid.
+  const tierOnly = LoadCalc.compute(base);
+  const yearNoZone = LoadCalc.compute({ ...base, yearBuilt: 2015 });
+  const zoneNoYear = LoadCalc.compute({ ...base, climateZone: 5 });
+  checkTrue(
+    "year built alone (no climate zone) changes nothing",
+    yearNoZone.heating.total === tierOnly.heating.total && yearNoZone.cooling.total === tierOnly.cooling.total,
+    `heat ${yearNoZone.heating.total}, cool ${yearNoZone.cooling.total}`
+  );
+  checkTrue(
+    "climate zone alone (no year built) changes nothing",
+    zoneNoYear.heating.total === tierOnly.heating.total && zoneNoYear.cooling.total === tierOnly.cooling.total,
+    `heat ${zoneNoYear.heating.total}, cool ${zoneNoYear.cooling.total}`
+  );
+  checkTrue(
+    "the quality-tier path reports itself as the basis, with every term sourced to the tier",
+    tierOnly.envelope.basis === "quality-tier" &&
+      Object.values(tierOnly.envelope.source).every((v) => v === "tier"),
+    `basis "${tierOnly.envelope.basis}"`
+  );
+
+  // 2. Nonsense vintage/zone input must be refused, not extrapolated.
+  checkTrue(
+    "envelopeFromVintage refuses missing or out-of-range input instead of guessing",
+    LoadCalc.envelopeFromVintage(null, 5) === null &&
+      LoadCalc.envelopeFromVintage(2015, null) === null &&
+      LoadCalc.envelopeFromVintage(2015, 0) === null &&
+      LoadCalc.envelopeFromVintage(2015, 9) === null &&
+      LoadCalc.envelopeFromVintage(1500, 5) === null,
+    "year and zone both required, zone must be 1-8"
+  );
+
+  // 3. The whole point: two identical homes of the same vintage in different
+  // climate zones must NOT be handed the same envelope. (Design conditions are
+  // held fixed here so the only thing moving is the code-era envelope itself.)
+  const hot = LoadCalc.compute({ ...base, yearBuilt: 2015, climateZone: 2 });
+  const cold = LoadCalc.compute({ ...base, yearBuilt: 2015, climateZone: 5 });
+  checkTrue(
+    "same vintage, different climate zone -> different envelope (the climate-blind spot is closed)",
+    cold.envelope.atticR > hot.envelope.atticR && cold.envelope.windowU < hot.envelope.windowU,
+    `zone 2: R-${hot.envelope.atticR}/U-${hot.envelope.windowU} vs zone 5: R-${cold.envelope.atticR}/U-${cold.envelope.windowU}`
+  );
+  checkTrue(
+    "the colder zone's stricter code shows up as a lower load at identical design conditions",
+    cold.heating.total < hot.heating.total,
+    `zone 5 heat ${cold.heating.total} < zone 2 heat ${hot.heating.total} BTU/h`
+  );
+
+  // 4. Newer construction must never compute as a bigger load than older
+  // construction of the same house in the same place.
+  const eras = [1950, 1970, 1985, 2000, 2009, 2016, 2023];
+  const byEra = eras.map((y) => LoadCalc.compute({ ...base, yearBuilt: y, climateZone: 5 }));
+  const heatMonotone = byEra.every((r, i) => i === 0 || r.heating.total <= byEra[i - 1].heating.total);
+  const coolMonotone = byEra.every((r, i) => i === 0 || r.cooling.total <= byEra[i - 1].cooling.total);
+  checkTrue(
+    "load falls monotonically as construction vintage gets newer (heating)",
+    heatMonotone,
+    byEra.map((r, i) => `${eras[i]}:${r.heating.total}`).join(" ")
+  );
+  checkTrue(
+    "load falls monotonically as construction vintage gets newer (cooling)",
+    coolMonotone,
+    byEra.map((r, i) => `${eras[i]}:${r.cooling.total}`).join(" ")
+  );
+
+  // 5. A real measurement always beats the table.
+  const measured = LoadCalc.compute({ ...base, yearBuilt: 1950, climateZone: 5, atticR: 60, windowU: 0.28, windowSHGC: 0.22, ach: 0.15 });
+  checkTrue(
+    "entered values override the vintage table, and the result says so per term",
+    measured.envelope.atticR === 60 && measured.envelope.windowU === 0.28 &&
+      Object.values(measured.envelope.source).every((v) => v === "entered"),
+    `R-${measured.envelope.atticR}/U-${measured.envelope.windowU}, all four terms "entered"`
+  );
+  const mixed = LoadCalc.compute({ ...base, yearBuilt: 1950, climateZone: 5, atticR: 60 });
+  checkTrue(
+    "a partially-entered envelope keeps the vintage default for every term left blank",
+    mixed.envelope.source.atticR === "entered" && mixed.envelope.source.windowU === "vintage" &&
+      mixed.envelope.source.ach === "vintage",
+    `atticR ${mixed.envelope.source.atticR}, windowU ${mixed.envelope.source.windowU}, ach ${mixed.envelope.source.ach}`
+  );
+
+  // 6. Typo guard. A fat-fingered decimal in a 7×8 table of numbers is silent
+  // and ships straight into someone's equipment order, so every era/zone pair
+  // is swept and held to a plausible band around the tier estimate it replaces.
+  let worst = { ratio: 1, era: null, zone: null };
+  let outliers = 0;
+  for (let zone = 1; zone <= 8; zone++) {
+    for (const y of eras) {
+      const r = LoadCalc.compute({ ...base, yearBuilt: y, climateZone: zone });
+      const ratio = r.cooling.total / tierOnly.cooling.total;
+      if (Math.abs(Math.log(ratio)) > Math.abs(Math.log(worst.ratio))) worst = { ratio, era: y, zone };
+      if (ratio < 0.5 || ratio > 1.6) outliers++;
+    }
+  }
+  checkTrue(
+    "every era × zone combination lands within a plausible band of the tier estimate (typo guard)",
+    outliers === 0,
+    `56 combinations swept, widest ${Math.round(worst.ratio * 100)}% of tier (${worst.era}, zone ${worst.zone})`
+  );
+
+  // 7. Table shape and internal consistency: each era row must cover zones 1-8
+  // with a null placeholder at index 0, and code stringency must never move
+  // backwards from one era to the next within a zone.
+  const rows = LoadCalc.VINTAGE_ENVELOPE;
+  const shapeOk = rows.every((row) =>
+    ["atticR", "windowU", "windowSHGC", "ach"].every((k) =>
+      row[k].length === 9 && row[k][0] === null && row[k].slice(1).every((v) => typeof v === "number" && v > 0)
+    )
+  );
+  checkTrue("every era row covers all 8 zones with numeric values", shapeOk, `${rows.length} eras`);
+
+  let backwards = [];
+  for (let zone = 1; zone <= 8; zone++) {
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i].atticR[zone] < rows[i - 1].atticR[zone]) backwards.push(`atticR z${zone} ${rows[i].era}`);
+      if (rows[i].windowU[zone] > rows[i - 1].windowU[zone]) backwards.push(`windowU z${zone} ${rows[i].era}`);
+      if (rows[i].windowSHGC[zone] > rows[i - 1].windowSHGC[zone]) backwards.push(`SHGC z${zone} ${rows[i].era}`);
+      if (rows[i].ach[zone] > rows[i - 1].ach[zone]) backwards.push(`ach z${zone} ${rows[i].era}`);
+    }
+  }
+  checkTrue(
+    "no era is modeled as built worse than the era before it, in any zone",
+    backwards.length === 0,
+    backwards.slice(0, 4).join(", ") || "56 zone/era transitions checked"
+  );
+
+  /*
+   * 8. Cross-check against the two published NREL/IBACOS reference houses used
+   * above. Both are 2009-IECC homes, so the table has to reproduce their real,
+   * documented envelope specs from nothing but "built in 2009, in this climate
+   * zone" — which is exactly the claim the feature makes to a user who enters
+   * only an address.
+   */
+  const orlSpec = LoadCalc.envelopeFromVintage(2009, 2);   // actual: R-31, U-0.65, SHGC-0.30
+  const chiSpec = LoadCalc.envelopeFromVintage(2009, 5);   // actual: R-38, U-0.35, SHGC-0.50
+  checkTrue(
+    "vintage table reproduces the published NREL Orlando house envelope from year + zone alone",
+    Math.abs(orlSpec.atticR - 31) <= 2 && Math.abs(orlSpec.windowU - 0.65) <= 0.08 && Math.abs(orlSpec.windowSHGC - 0.30) <= 0.05,
+    `predicted R-${orlSpec.atticR}/U-${orlSpec.windowU}/SHGC-${orlSpec.windowSHGC} vs actual R-31/U-0.65/SHGC-0.30`
+  );
+  checkTrue(
+    "vintage table reproduces the published NREL Chicago house envelope from year + zone alone",
+    Math.abs(chiSpec.atticR - 38) <= 2 && Math.abs(chiSpec.windowU - 0.35) <= 0.05 && Math.abs(chiSpec.windowSHGC - 0.50) <= 0.08,
+    `predicted R-${chiSpec.atticR}/U-${chiSpec.windowU}/SHGC-${chiSpec.windowSHGC} vs actual R-38/U-0.35/SHGC-0.50`
+  );
+  /*
+   * The one term vintage cannot predict, stated as a test so it can't quietly
+   * become an unexamined assumption: both reference houses were air-sealed far
+   * tighter than era-typical stock (0.10 and 0.19 ACHn measured). The table
+   * knowingly reports era-typical instead, which is why a blower-door number
+   * belongs in the ach field whenever one exists.
+   */
+  checkTrue(
+    "air sealing is the term vintage can't predict — table stays era-typical, looser than these two research houses",
+    orlSpec.ach > 0.10 && chiSpec.ach > 0.19,
+    `table ${orlSpec.ach} / ${chiSpec.ach} ACHn vs measured 0.10 / 0.19 — enter a blower-door result when there is one`
+  );
+}
+
 console.log(`\n${fail === 0 ? "✅ ALL CHECKS PASSED" : "❌ " + fail + " CHECK(S) FAILED"} (${pass} passed)`);
 process.exit(fail ? 1 : 0);

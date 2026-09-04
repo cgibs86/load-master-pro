@@ -106,7 +106,21 @@ whoever picks up this app next.
    beat the current dropdown on their own. US coverage only; needs a
    fallback to the existing "average" tier where `buildingInsights` 404s.
 
-10. **NREL ResStock-derived static lookup table (free, offline data-prep,
+10. **SHIPPED (as EnvelopeIQ, code-minimum table rather than a ResStock
+    ETL).** The vintage x climate-zone envelope default idea below is now
+    live in `loadcalc.js` (`VINTAGE_ENVELOPE` / `envelopeFromVintage()`),
+    sourced from the energy-code minimums in force per era and IECC zone
+    rather than from a ResStock aggregation. Code minimums were chosen for
+    the first cut because they are citable in a report, need no ETL job or
+    annual refresh, and validated cleanly against the two published NREL
+    Building America reference houses this engine is benchmarked on. A
+    ResStock pass remains worthwhile later as a *second* column: code
+    minimum is what the house was legally required to have, while ResStock
+    medians are what comparable houses actually have — the gap between them
+    is real, particularly for pre-1980 stock and for post-retrofit homes.
+    The original note follows.
+
+    **NREL ResStock-derived static lookup table (free, offline data-prep,
     no runtime API).** ResStock's ~550k-home statistically-representative
     baseline metadata (hosted as CSV/Parquet on the OEDI S3 data lake, not
     a live API) could replace the flat 3-tier good/average/poor construction

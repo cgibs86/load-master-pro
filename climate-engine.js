@@ -9,6 +9,10 @@
  *   outGrains = humidity ratio (grains/lb) from the median dew point during
  *               the hottest 1% of hours, at site barometric pressure
  *   elevFt    = site elevation (drives air-density correction)
+ *   hdd65 / cdd50 / climateZone
+ *             = heating and cooling degree days from the same hourly series,
+ *               and the IECC/ASHRAE-169 thermal climate zone they imply —
+ *               which selects the vintage envelope defaults in loadcalc.js
  *
  * Falls back to the embedded nearest-station table when offline or on error.
  * Exposed as window.ClimateEngine (and globalThis for Node tests).
@@ -24,6 +28,68 @@
   }
 
   function median(arr) { return percentile(arr, 0.5); }
+
+  /*
+   * Heating/cooling degree days from the same hourly temperature series the
+   * design conditions come from. Degree days are defined on DAILY MEAN
+   * temperature, so the hourly series is chunked into 24-hour days first —
+   * summing hourly departures directly would inflate both totals (a day that
+   * swings either side of the base would contribute to HDD and CDD at once).
+   *
+   *   hdd65 = sum of max(0, 65 - dailyMean)   — the IECC/ASHRAE heating index
+   *   cdd50 = sum of max(0, dailyMean - 50)   — the IECC/ASHRAE cooling index
+   *
+   * Days with fewer than 20 valid hourly readings are skipped, and the totals
+   * are scaled to a full 365-day year so a short or gap-ridden series doesn't
+   * read as a milder climate than it is.
+   */
+  function degreeDays(temps) {
+    var hdd = 0, cdd = 0, days = 0;
+    for (var i = 0; i + 1 < temps.length; i += 24) {
+      var sum = 0, n = 0;
+      for (var h = i; h < i + 24 && h < temps.length; h++) {
+        var v = temps[h];
+        if (typeof v === "number" && isFinite(v)) { sum += v; n++; }
+      }
+      if (n < 20) continue;                        // incomplete day
+      var mean = sum / n;
+      if (mean < 65) hdd += 65 - mean;
+      if (mean > 50) cdd += mean - 50;
+      days++;
+    }
+    if (days < 300) return null;                   // not enough of a year to index a climate
+    var scale = 365 / days;
+    return { hdd65: Math.round(hdd * scale), cdd50: Math.round(cdd * scale), days: days };
+  }
+
+  /*
+   * IECC / ASHRAE 169 thermal climate zone (1-8) from degree days, using the
+   * published numeric criteria (IP units). Only the ZONE NUMBER is derived —
+   * the moisture suffix (A moist / B dry / C marine) is defined by
+   * precipitation criteria this engine doesn't fetch, and nothing downstream
+   * needs it: the code-minimum envelope values that consume this are keyed on
+   * the number alone.
+   *
+   * Caveat worth knowing (and disclosed in the UI): the official county-level
+   * zone assignments come from 30-year normals, while this is derived from the
+   * last ~12 months, so a location sitting on a zone boundary can land one
+   * zone either side of its published assignment. The consequence downstream
+   * is one step of nominal insulation R in a *default* the user can override,
+   * which is why a live-data zone is still worth far more than no zone at all.
+   */
+  function iecczone(hdd65, cdd50) {
+    if (!(hdd65 >= 0) || !(cdd50 >= 0)) return null;
+    if (cdd50 > 9000) return 1;
+    if (cdd50 > 6300) return 2;
+    if (cdd50 > 4500) return 3;
+    // Cooling-poor from here down: the heating index decides.
+    if (hdd65 <= 3600) return 3;                   // mild winter, mild summer (marine 3C)
+    if (hdd65 <= 5400) return 4;
+    if (hdd65 <= 7200) return 5;
+    if (hdd65 <= 9000) return 6;
+    if (hdd65 <= 12600) return 7;
+    return 8;
+  }
 
   // Humidity ratio in grains/lb from dew point (°F) at site elevation (ft).
   function grainsFromDewpoint(dewF, elevFt) {
@@ -90,7 +156,14 @@
     // Sanity clamps — reject obviously broken data rather than mis-size equipment.
     if (heating99 < -40 || heating99 > 65 || cooling1 < 65 || cooling1 > 120) return null;
     if (outGrains == null || outGrains < 15 || outGrains > 180) outGrains = null;
-    return { heating99: heating99, cooling1: cooling1, outGrains: outGrains, elevFt: elevFt, hours: t.length };
+    // Degree days + climate zone come from the raw (unfiltered) hourly series
+    // so day boundaries stay intact — t has had its gaps compacted out.
+    var dd = degreeDays(temps);
+    var zone = dd ? iecczone(dd.hdd65, dd.cdd50) : null;
+    return {
+      heating99: heating99, cooling1: cooling1, outGrains: outGrains, elevFt: elevFt, hours: t.length,
+      hdd65: dd ? dd.hdd65 : null, cdd50: dd ? dd.cdd50 : null, climateZone: zone
+    };
   }
 
   // US Geological Survey Elevation Point Query Service: free, no key, no
@@ -156,6 +229,7 @@
 
   var api = {
     percentile: percentile, median: median, grainsFromDewpoint: grainsFromDewpoint, analyze: analyze,
+    degreeDays: degreeDays, iecczone: iecczone,
     fetchElevationUSGS: fetchElevationUSGS, fetchLive: fetchLive
   };
   root.ClimateEngine = api;

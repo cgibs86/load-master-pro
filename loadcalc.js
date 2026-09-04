@@ -89,6 +89,133 @@
     return "poor";
   }
 
+  /*
+   * ---- Vintage × climate-zone envelope defaults ("EnvelopeIQ") ------------
+   *
+   * The 3-tier quality bucket above is climate-blind: with it alone, a 2015
+   * home in Phoenix and a 2015 home in Minneapolis are handed the SAME attic
+   * R-value, window U-factor and air leakage, when the energy code that built
+   * them required very different assemblies. That single blind spot moves
+   * tonnage, and for the address-only user (who overrides nothing) it is the
+   * largest remaining source of error in the estimate.
+   *
+   * So when the year built AND the site's climate zone are both known, the
+   * envelope defaults come from this table instead: nominal attic insulation
+   * R-value, window U-factor and SHGC, and natural air changes per hour, by
+   * construction era and IECC climate zone (1-8, index 0 unused).
+   *
+   * Basis, and what these numbers are NOT:
+   *   - Post-1980 rows track the prescriptive envelope minimums of the energy
+   *     code in force for that era (MEC 1983/1992/1995, IECC 1998-2003,
+   *     2006/2009, 2012/2015/2018, 2021) at each zone. Code minimum is what
+   *     production builders build to, which is why it predicts the stock well.
+   *   - Pre-1980 rows are TYPICAL PRESENT-DAY condition, not as-built: most
+   *     surviving pre-code homes have had attic insulation added and many have
+   *     had windows replaced, so as-built values (often R-0 ceilings) would
+   *     badly overstate load — the direction that oversizes equipment.
+   *   - Air leakage is natural ACH, not ACH50. Post-2012 rows reflect the
+   *     3 ACH50 (zones 3-8) / 5 ACH50 (zones 1-2) code targets divided by a
+   *     typical LBL n-factor of ~20.
+   *   - Every value is a DEFAULT that any real measurement replaces: an
+   *     NFRC window label, a blower-door number, or a tape measure in the
+   *     attic all win over this table (see the override plumbing below).
+   *
+   * Validation: the two published NREL/IBACOS Building America reference
+   * houses this engine is benchmarked against (see tests) are both 2009-IECC
+   * homes, so they fall in the "2006-2011" row — which independently predicts
+   * Orlando (zone 2) R-30/U-0.60/SHGC-0.30 against the houses' actual
+   * R-31/U-0.65/SHGC-0.30, and Chicago (zone 5) R-38/U-0.35/SHGC-0.45
+   * against an actual R-38/U-0.35/SHGC-0.50. Air sealing is the one term the
+   * table can't predict from vintage: both reference houses were sealed far
+   * tighter (0.10 and 0.19 ACHn) than era-typical stock, which is exactly why
+   * the ach override exists and why a blower-door number should always be
+   * entered when there is one.
+   */
+  const VINTAGE_ENVELOPE = [
+    {
+      maxYear: 1959, era: "pre-1960",
+      label: "pre-1960, built before any energy code",
+      //         zone:  -    1     2     3     4     5     6     7     8
+      atticR:        [null,  11,   11,   11,   13,   19,   19,   19,   19],
+      windowU:       [null, 1.05, 1.00, 0.90, 0.75, 0.70, 0.65, 0.62, 0.62],
+      windowSHGC:    [null, 0.65, 0.65, 0.65, 0.62, 0.60, 0.60, 0.60, 0.60],
+      ach:           [null, 0.90, 0.90, 0.88, 0.85, 0.85, 0.82, 0.80, 0.80]
+    },
+    {
+      maxYear: 1979, era: "1960-1979",
+      label: "1960-1979, pre-code to first voluntary standards",
+      atticR:        [null,  11,   11,   13,   19,   19,   26,   26,   26],
+      windowU:       [null, 1.00, 0.95, 0.85, 0.70, 0.65, 0.60, 0.58, 0.58],
+      windowSHGC:    [null, 0.62, 0.62, 0.62, 0.60, 0.58, 0.58, 0.58, 0.58],
+      ach:           [null, 0.75, 0.75, 0.72, 0.70, 0.68, 0.66, 0.65, 0.65]
+    },
+    {
+      maxYear: 1993, era: "1980-1993",
+      label: "1980-1993, first-generation energy codes (MEC)",
+      atticR:        [null,  19,   19,   26,   30,   30,   38,   38,   38],
+      windowU:       [null, 0.90, 0.85, 0.70, 0.60, 0.55, 0.50, 0.50, 0.50],
+      windowSHGC:    [null, 0.58, 0.58, 0.58, 0.56, 0.55, 0.55, 0.55, 0.55],
+      ach:           [null, 0.60, 0.60, 0.58, 0.55, 0.52, 0.50, 0.50, 0.50]
+    },
+    {
+      maxYear: 2005, era: "1994-2005",
+      label: "1994-2005, MEC 1995 / IECC 1998-2003",
+      atticR:        [null,  26,   26,   30,   38,   38,   38,   38,   49],
+      windowU:       [null, 0.75, 0.70, 0.55, 0.45, 0.42, 0.40, 0.38, 0.38],
+      windowSHGC:    [null, 0.45, 0.45, 0.48, 0.55, 0.55, 0.55, 0.55, 0.55],
+      ach:           [null, 0.50, 0.50, 0.48, 0.45, 0.42, 0.40, 0.40, 0.40]
+    },
+    {
+      maxYear: 2011, era: "2006-2011",
+      label: "2006-2011, 2006/2009 IECC",
+      atticR:        [null,  30,   30,   30,   38,   38,   49,   49,   49],
+      windowU:       [null, 0.65, 0.60, 0.50, 0.35, 0.35, 0.35, 0.35, 0.35],
+      windowSHGC:    [null, 0.30, 0.30, 0.30, 0.40, 0.45, 0.45, 0.45, 0.45],
+      ach:           [null, 0.35, 0.35, 0.32, 0.30, 0.28, 0.28, 0.28, 0.28]
+    },
+    {
+      maxYear: 2020, era: "2012-2020",
+      label: "2012-2020, 2012/2015/2018 IECC (blower-door testing required)",
+      // Zone 1 ceilings stayed at R-30 from 2012 through 2021 — the code
+      // raised zones 2-8 and left the hottest zone alone.
+      atticR:        [null,  30,   38,   38,   49,   49,   49,   49,   49],
+      windowU:       [null, 0.50, 0.40, 0.35, 0.32, 0.30, 0.30, 0.30, 0.30],
+      windowSHGC:    [null, 0.25, 0.25, 0.25, 0.40, 0.40, 0.40, 0.40, 0.40],
+      ach:           [null, 0.25, 0.25, 0.16, 0.16, 0.15, 0.15, 0.15, 0.15]
+    },
+    {
+      maxYear: 9999, era: "2021+",
+      label: "2021 IECC or newer",
+      atticR:        [null,  30,   49,   49,   60,   60,   60,   60,   60],
+      windowU:       [null, 0.50, 0.40, 0.30, 0.30, 0.30, 0.30, 0.30, 0.30],
+      windowSHGC:    [null, 0.25, 0.25, 0.25, 0.40, 0.40, 0.40, 0.40, 0.40],
+      ach:           [null, 0.25, 0.25, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15]
+    }
+  ];
+
+  /*
+   * Envelope defaults for a (year built, climate zone) pair, or null when
+   * either is missing/out of range — in which case every caller falls back to
+   * the 3-tier quality bucket, exactly as before this table existed.
+   */
+  function envelopeFromVintage(year, zone) {
+    var y = Number(year), z = Number(zone);
+    if (!isFinite(y) || y < 1800 || y > 2100) return null;
+    if (!isFinite(z) || z < 1 || z > 8) return null;
+    z = Math.round(z);
+    for (var i = 0; i < VINTAGE_ENVELOPE.length; i++) {
+      var row = VINTAGE_ENVELOPE[i];
+      if (y <= row.maxYear) {
+        return {
+          era: row.era, label: row.label, zone: z, yearBuilt: y,
+          atticR: row.atticR[z], windowU: row.windowU[z],
+          windowSHGC: row.windowSHGC[z], ach: row.ach[z]
+        };
+      }
+    }
+    return null;
+  }
+
   // Common residential furnace OUTPUT capacities (input × ~96% AFUE), BTU/h.
   const FURNACE_OUTPUTS = [38000, 57000, 76000, 96000, 115000];
 
@@ -381,6 +508,15 @@
     }
     o.ductFactor = ductFactor; // keep echoed inputs.ductFactor in sync with the value actually used
 
+    /*
+     * Vintage × climate-zone envelope defaults. This sits BETWEEN the explicit
+     * per-field overrides (which always win) and the 3-tier quality bucket
+     * (the floor, and still the only source when either the year built or the
+     * climate zone is unknown). Passing neither reproduces pre-EnvelopeIQ
+     * numbers bit for bit, which the benchmark suite pins.
+     */
+    const vin = envelopeFromVintage(o.yearBuilt, o.climateZone);
+
     const heating99 = o.heating99;   // outdoor winter design temp, °F
     const cooling1 = o.cooling1;     // outdoor summer design temp, °F
     const outGrains = o.outGrains;   // outdoor design humidity, grains/lb
@@ -419,7 +555,8 @@
     // overstatement before this override existed). Guarded to a plausible
     // range; omitted -> exact legacy per-tier ach.
     const achNum = o.ach != null ? Number(o.ach) : NaN;
-    const achEff = (!isNaN(achNum) && achNum > 0 && achNum <= 3) ? achNum : q.ach;
+    const achFallback = (vin && vin.ach != null) ? vin.ach : q.ach;
+    const achEff = (!isNaN(achNum) && achNum > 0 && achNum <= 3) ? achNum : achFallback;
 
     // Natural infiltration converted to CFM.
     const cfm = (achEff * volume) / 60;
@@ -434,7 +571,9 @@
     // U-value from it instead of the flat per-quality-tier constant. Omitted or
     // below the guard -> exact legacy behavior (q.uRoof), unchanged.
     const atticRNum = o.atticR != null ? Number(o.atticR) : NaN;
-    const uRoofEff = (!isNaN(atticRNum) && atticRNum >= 5) ? 1 / (atticRNum + ROOF_BASE_R) : q.uRoof;
+    const atticREff = (!isNaN(atticRNum) && atticRNum >= 5) ? atticRNum
+      : ((vin && vin.atticR >= 5) ? vin.atticR : null);
+    const uRoofEff = atticREff != null ? 1 / (atticREff + ROOF_BASE_R) : q.uRoof;
 
     // (A wallR override analogous to atticR was tried and rejected during
     // validation against published NREL Manual J case studies: unlike a roof
@@ -456,9 +595,11 @@
     // independently. Guarded against nonsensical entries; omitted -> exact
     // legacy per-tier behavior.
     const winUNum = o.windowU != null ? Number(o.windowU) : NaN;
-    const uWinEff = (!isNaN(winUNum) && winUNum > 0 && winUNum <= 3) ? winUNum : q.uWin;
+    const uWinFallback = (vin && vin.windowU != null) ? vin.windowU : q.uWin;
+    const uWinEff = (!isNaN(winUNum) && winUNum > 0 && winUNum <= 3) ? winUNum : uWinFallback;
     const winSHGCNum = o.windowSHGC != null ? Number(o.windowSHGC) : NaN;
-    const shgcEff = (!isNaN(winSHGCNum) && winSHGCNum > 0 && winSHGCNum <= 1) ? winSHGCNum : q.shgc;
+    const shgcFallback = (vin && vin.windowSHGC != null) ? vin.windowSHGC : q.shgc;
+    const shgcEff = (!isNaN(winSHGCNum) && winSHGCNum > 0 && winSHGCNum <= 1) ? winSHGCNum : shgcFallback;
 
     // Conductive UA (BTU/hr·°F). Floor counts for heating, dropped for cooling
     // (ground stays near/below indoor temp in summer).
@@ -516,6 +657,39 @@
 
     const hp = balancePoint(recommendedTons, heating, o.indoorHeat, heating99, o.systemType);
 
+    /*
+     * Envelope provenance. Every one of the four terms that most moves the
+     * answer resolves from one of three places — a number the user entered, the
+     * vintage × zone table, or the 3-tier quality bucket — and the UI shows
+     * which, per term. An assumption a contractor can see is an assumption a
+     * contractor can correct, and that is the whole point of surfacing it.
+     */
+    const atticRExplicit = !isNaN(atticRNum) && atticRNum >= 5;
+    const winUExplicit = !isNaN(winUNum) && winUNum > 0 && winUNum <= 3;
+    const shgcExplicit = !isNaN(winSHGCNum) && winSHGCNum > 0 && winSHGCNum <= 1;
+    const achExplicit = !isNaN(achNum) && achNum > 0 && achNum <= 3;
+    function envSrc(explicit, vinVal) {
+      return explicit ? "entered" : (vin && vinVal != null ? "vintage" : "tier");
+    }
+    const envelope = {
+      basis: vin ? "vintage-zone" : "quality-tier",
+      era: vin ? vin.era : null,
+      eraLabel: vin ? vin.label : null,
+      zone: vin ? vin.zone : null,
+      yearBuilt: vin ? vin.yearBuilt : null,
+      // Effective values actually used in the math above.
+      atticR: atticREff != null ? atticREff : Math.round(1 / q.uRoof - ROOF_BASE_R),
+      windowU: Math.round(uWinEff * 100) / 100,
+      windowSHGC: Math.round(shgcEff * 100) / 100,
+      ach: Math.round(achEff * 100) / 100,
+      source: {
+        atticR: envSrc(atticRExplicit, vin && vin.atticR),
+        windowU: envSrc(winUExplicit, vin && vin.windowU),
+        windowSHGC: envSrc(shgcExplicit, vin && vin.windowSHGC),
+        ach: envSrc(achExplicit, vin && vin.ach)
+      }
+    };
+
     const pct = o.rangePct;
     function band(v) { return { low: Math.round(v * (1 - pct)), high: Math.round(v * (1 + pct)) }; }
 
@@ -549,11 +723,12 @@
       sizing: sizing,
       sqftPerTon: Math.round(o.area / recommendedTons),
       equipment: equipment,
-      heatpump: hp
+      heatpump: hp,
+      envelope: envelope
     };
   }
 
-  const api = { compute, qualityFromYear, airFactor, balancePoint, sizeFor, manualSFit, shrCheck, resolveDuctFactor, returnAirCheck, QUALITY, DEFAULTS };
+  const api = { compute, qualityFromYear, envelopeFromVintage, airFactor, balancePoint, sizeFor, manualSFit, shrCheck, resolveDuctFactor, returnAirCheck, QUALITY, DEFAULTS, VINTAGE_ENVELOPE };
   root.LoadCalc = api;
   if (typeof module !== "undefined" && module.exports) {
     module.exports = api;

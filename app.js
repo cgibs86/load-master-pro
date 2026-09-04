@@ -170,7 +170,13 @@
           city: station.city, source: "live", hours: live.hours,
           heating99: live.heating99, cooling1: live.cooling1,
           outGrains: live.outGrains != null ? live.outGrains : station.outGrains,
-          elevFt: live.elevFt
+          elevFt: live.elevFt,
+          // Degree days and the IECC zone they imply come only from the live
+          // hourly series — the embedded station table carries design
+          // conditions, not a year of temperatures, so the fallback path
+          // leaves these null and EnvelopeIQ quietly reverts to the 3-tier
+          // quality bucket rather than guessing a zone.
+          hdd65: live.hdd65, cdd50: live.cdd50, climateZone: live.climateZone
         };
       } else {
         state.climate = {
@@ -235,6 +241,20 @@
     // undefined (both omitted) keeps exact legacy behavior in loadcalc.js.
     var windowFrac = o.windowFrac != null ? o.windowFrac : (pa.windowFrac != null ? pa.windowFrac : undefined);
     var stories = o.stories != null ? o.stories : (pa.stories != null ? pa.stories : undefined);
+    // EnvelopeIQ: year built × IECC climate zone selects era-typical attic R,
+    // window U/SHGC and air-tightness defaults in place of the flat 3-tier
+    // quality bucket. It is deliberately the WEAKEST source of those numbers:
+    // it feeds the engine only when nobody asserted a construction-quality
+    // tier directly, because a user's dropdown pick or a PhotoScan read of the
+    // actual house is real evidence about THIS home, while the table only
+    // knows what code required the year it was built. Anything typed into the
+    // fine-tune fields still wins over both (loadcalc.js resolves that order).
+    var qualityAsserted = !!(o.qualityPicked || pa.quality);
+    // A year typed into Fine-tune inputs beats the property record — it's the
+    // person standing at the house correcting the data vendor.
+    var yearKnown = o.yearBuilt != null ? o.yearBuilt : p.yearBuilt;
+    var yearBuilt = (!qualityAsserted && yearKnown) ? yearKnown : undefined;
+    var climateZone = (yearBuilt != null && c.climateZone) ? c.climateZone : undefined;
     // atticR only actually affects the engine when >= 5 (loadcalc.js's own
     // guard) — echo back the *effective* value so the UI/report never show an
     // override that had zero effect on the numbers.
@@ -243,7 +263,7 @@
       area: area, bedrooms: bedrooms, quality: quality, foundation: foundation, sun: sun, systemType: systemType, ceiling: ceiling, rangePct: rangePct,
       atticR: atticREffective, windowU: windowU, windowSHGC: windowSHGC, ach: ach, ductType: ductType, ductCondition: ductCondition,
       retAirMode: retAirMode, retAirDuctIn: retAirDuctIn, retAirGrilleW: retAirGrilleW, retAirGrilleH: retAirGrilleH,
-      windowFrac: windowFrac, stories: stories
+      windowFrac: windowFrac, stories: stories, yearBuilt: yearKnown || undefined
     };
     var opts = {
       area: area, bedrooms: bedrooms, quality: quality, foundation: foundation, sun: sun, systemType: systemType, ceiling: ceiling,
@@ -263,6 +283,12 @@
     if (ductCondition != null) opts.ductCondition = ductCondition;
     if (windowFrac != null) opts.windowFrac = windowFrac;
     if (stories != null) opts.stories = stories;
+    // Both or neither: envelopeFromVintage() needs the pair to resolve a row,
+    // and passing one alone would just be ignored downstream.
+    if (yearBuilt != null && climateZone != null) {
+      opts.yearBuilt = yearBuilt;
+      opts.climateZone = climateZone;
+    }
     state.result = window.LoadCalc.compute(opts);
     // Return-air adequacy is validation-only (doesn't feed back into the load),
     // so it's computed once here off the just-computed result and stored on
@@ -352,6 +378,7 @@
       '</div>' +
 
       hpCard(r, c) +
+      envelopeCard(r) +
       photosCard() +
       photoInsightsCard() +
       permitCard() +
@@ -778,6 +805,65 @@
       '</div>';
   }
 
+  /*
+   * EnvelopeIQ — where the four envelope numbers that most move the answer
+   * actually came from. Each is tagged "entered" (a real number from the
+   * fine-tune fields), "vintage" (the year-built × climate-zone code table),
+   * or "tier" (the fallback construction-quality bucket). Surfacing this is
+   * the point of the feature: a contractor who can see that R-38 was assumed
+   * from a 2009 build year, not measured, knows exactly which assumption to
+   * go check in the attic.
+   */
+  function envelopeIcon() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10l9-7 9 7"/><path d="M5 9v11h14V9"/><path d="M9 20v-6h6v6"/></svg>'; }
+
+  var ENV_SRC_LABEL = { entered: "you entered", vintage: "code-era typical", tier: "tier default" };
+
+  function envelopeCard(r) {
+    var env = r.envelope;
+    if (!env) return "";
+    function row(label, value, src, hint) {
+      return '<div class="env-row">' +
+        '<span class="env-label">' + label + '</span>' +
+        '<b class="env-val">' + value + '</b>' +
+        '<span class="env-src ' + src + '">' + ENV_SRC_LABEL[src] + '</span>' +
+        (hint ? '<span class="env-hint">' + hint + '</span>' : '') +
+        '</div>';
+    }
+    // Three distinct reasons the table can be idle, and they call for three
+    // different things from the user — so say which one this is rather than
+    // showing one vague "using the tier" line for all of them.
+    var e = state.effective || {};
+    var head, sub;
+    if (env.basis === "vintage-zone") {
+      head = 'Built ' + env.yearBuilt + ' &middot; IECC climate zone ' + env.zone;
+      sub = 'Defaults come from what ' + escapeHtml(env.eraLabel) + ' required in zone ' + env.zone + ', not from a generic average.';
+    } else if (e.yearBuilt && !state.climate.climateZone) {
+      head = 'Built ' + e.yearBuilt + ' &middot; no climate zone available';
+      sub = 'The climate zone comes from a year of on-site hourly weather; this run fell back to the nearest station table, so the construction tier sets the envelope instead.';
+    } else if (e.yearBuilt) {
+      head = 'Built ' + e.yearBuilt + ' &middot; construction tier overrides';
+      sub = 'You picked a construction tier, so it outranks what the ' + e.yearBuilt + ' energy code would have required. Clear the tier pick to fall back to code-era defaults for this build year.';
+    } else {
+      head = 'No build year — using the construction tier';
+      sub = 'Add the year built under Fine-tune inputs to swap these broad tier defaults for what the energy code actually required for this home.';
+    }
+    var anyAssumed = ["atticR", "windowU", "windowSHGC", "ach"].some(function (k) { return env.source[k] !== "entered"; });
+    return '' +
+      '<div class="env-card">' +
+        '<div class="env-head"><span class="ico">' + envelopeIcon() + '</span>EnvelopeIQ<span class="env-basis">' + head + '</span></div>' +
+        '<p class="env-sub">' + sub + '</p>' +
+        '<div class="env-grid">' +
+          row("Attic insulation", "R-" + env.atticR, env.source.atticR) +
+          row("Window U-factor", env.windowU.toFixed(2), env.source.windowU) +
+          row("Window SHGC", env.windowSHGC.toFixed(2), env.source.windowSHGC) +
+          row("Air leakage", env.ach.toFixed(2) + " ACH", env.source.ach) +
+        '</div>' +
+        (anyAssumed
+          ? '<p class="env-foot">Anything still marked <i>' + ENV_SRC_LABEL.vintage + '</i> or <i>' + ENV_SRC_LABEL.tier + '</i> is an assumption, not a measurement. A tape measure in the attic, the NFRC sticker on a window, or a blower-door number entered under Fine-tune inputs replaces it and tightens the load.</p>'
+          : '<p class="env-foot">Every envelope value here is a number you entered — this load rests on measurements, not era assumptions.</p>') +
+      '</div>';
+  }
+
   // Manual S fit: only shown when the closest available equipment size can't
   // land inside the allowed percent-of-load band, since that's the case where
   // the headline tonnage needs a caveat to be honest.
@@ -865,6 +951,20 @@
 
   function adjustBlock(e, p) {
     var q = e.quality;
+    /*
+     * Placeholders name the value the engine is ACTUALLY using when it came
+     * from the vintage x zone table, so the blank field reads as "we assumed
+     * R-38 because this is a 2009 house" rather than the vaguer "blank = tier
+     * above". Seeing the specific number is what prompts someone to go verify
+     * it, which is the whole reason EnvelopeIQ exists.
+     */
+    var env = state.result && state.result.envelope;
+    function ph(key, shown, fallback) {
+      if (env && env.source[key] === "vintage") {
+        return "blank = " + shown + " assumed for a " + env.yearBuilt + " home in zone " + env.zone;
+      }
+      return fallback;
+    }
     return '' +
       '<details class="details" id="adjustDetails"><summary>Fine-tune inputs<svg class="caret" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></summary>' +
         '<div class="details-body adjust">' +
@@ -873,6 +973,8 @@
           '<input type="number" id="inArea" min="200" max="20000" step="50" value="' + e.area + '" />' +
           '<label>Bedrooms</label>' +
           '<input type="number" id="inBeds" min="0" max="12" step="1" value="' + e.bedrooms + '" />' +
+          '<label>Year built (optional — unlocks EnvelopeIQ)</label>' +
+          '<input type="number" id="inYearBuilt" min="1800" max="2100" step="1" placeholder="' + (env && env.basis === "vintage-zone" ? escapeHtml(String(env.yearBuilt) + " (from property records)") : "e.g. 1994 — sets code-era insulation, windows and air sealing") + '" value="' + (e.yearBuilt != null ? e.yearBuilt : "") + '" />' +
           '<label>Construction / insulation</label>' +
           '<div class="seg" id="segQuality">' +
             segBtn("good", "Well sealed", q) +
@@ -911,15 +1013,15 @@
               '<input type="number" id="inWindowFrac" min="5" max="40" step="1" placeholder="leave blank for 15% default" value="' + (e.windowFrac != null ? Math.round(e.windowFrac * 100) : "") + '" /></div>' +
           '</div>' +
           '<label>Attic insulation (R-value, optional)</label>' +
-          '<input type="number" id="inAtticR" min="5" max="100" step="1" placeholder="leave blank to use construction tier above (R-5 minimum)" value="' + (e.atticR != null ? e.atticR : "") + '" />' +
+          '<input type="number" id="inAtticR" min="5" max="100" step="1" placeholder="' + escapeHtml(ph('atticR', 'R-' + (env ? env.atticR : ''), 'leave blank to use construction tier above (R-5 minimum)')) + '" value="' + (e.atticR != null ? e.atticR : "") + '" />' +
           '<div class="adjust-row">' +
             '<div><label>Window U-factor (optional, NFRC label)</label>' +
-              '<input type="number" id="inWindowU" min="0.05" max="3" step="0.01" placeholder="blank = tier above" value="' + (e.windowU != null ? e.windowU : "") + '" /></div>' +
+              '<input type="number" id="inWindowU" min="0.05" max="3" step="0.01" placeholder="' + escapeHtml(ph('windowU', 'U-' + (env ? env.windowU.toFixed(2) : ''), 'blank = tier above')) + '" value="' + (e.windowU != null ? e.windowU : "") + '" /></div>' +
             '<div><label>Window SHGC (optional, NFRC label)</label>' +
-              '<input type="number" id="inWindowSHGC" min="0.05" max="1" step="0.01" placeholder="blank = tier above" value="' + (e.windowSHGC != null ? e.windowSHGC : "") + '" /></div>' +
+              '<input type="number" id="inWindowSHGC" min="0.05" max="1" step="0.01" placeholder="' + escapeHtml(ph('windowSHGC', 'SHGC ' + (env ? env.windowSHGC.toFixed(2) : ''), 'blank = tier above')) + '" value="' + (e.windowSHGC != null ? e.windowSHGC : "") + '" /></div>' +
           '</div>' +
           '<label>Air sealing — ACH natural (optional, from a blower-door/energy audit)</label>' +
-          '<input type="number" id="inAch" min="0.05" max="3" step="0.01" placeholder="leave blank to use construction tier above" value="' + (e.ach != null ? e.ach : "") + '" />' +
+          '<input type="number" id="inAch" min="0.05" max="3" step="0.01" placeholder="' + escapeHtml(ph('ach', (env ? env.ach.toFixed(2) : '') + ' ACH', 'leave blank to use construction tier above')) + '" value="' + (e.ach != null ? e.ach : "") + '" />' +
           '<div class="adjust-row">' +
             '<div><label>Duct location</label>' +
               '<select id="inDuctType">' +
@@ -971,6 +1073,12 @@
         if (!b) return;
         seg.querySelectorAll("button").forEach(function (x) { x.classList.remove("on"); });
         b.classList.add("on");
+        // Recalculate always writes back whichever tier button is lit, even
+        // the one the app pre-selected — so the override value alone can't
+        // tell a deliberate pick apart from an echo. This flag records the
+        // actual click, and it's what lets a deliberate tier choice outrank
+        // the vintage table without every Recalculate silently doing so.
+        state.overrides.qualityPicked = true;
       });
     }
     // Duct condition doesn't matter for ductless systems — hide it instantly
@@ -994,6 +1102,8 @@
       state.overrides.area = isFinite(area) ? area : undefined;
       state.overrides.bedrooms = isFinite(beds) ? beds : undefined;
       state.overrides.quality = qOn ? qOn.getAttribute("data-q") : undefined;
+      var yearEl = $("#inYearBuilt"); var yearVal = yearEl ? parseInt(yearEl.value, 10) : NaN;
+      state.overrides.yearBuilt = (isFinite(yearVal) && yearVal >= 1800 && yearVal <= 2100) ? yearVal : undefined;
       state.overrides.foundation = $("#inFoundation").value;
       state.overrides.sun = $("#inSun").value;
       state.overrides.systemType = $("#inSystem").value;
@@ -1201,6 +1311,7 @@
             rrow("Winter design (99%)", c.heating99 + "°F") +
             rrow("Design humidity", (c.outGrains || 0) + " grains/lb") +
             rrow("Elevation / air density", fmt(c.elevFt || 0) + " ft · factor " + r.inputs.acf) +
+            (c.climateZone ? rrow("IECC climate zone", "Zone " + c.climateZone + (c.hdd65 != null ? " · " + fmt(c.hdd65) + " HDD65 / " + fmt(c.cdd50) + " CDD50" : "")) : "") +
             rrow("Indoor setpoints", "75°F cooling / 70°F heating") +
             rrow("Confidence band", "±" + Math.round(e.rangePct * 100) + "%") +
           '</table></div>' +
@@ -1217,6 +1328,7 @@
             (e.ductType && e.ductType !== "ductless" && e.ductCondition ? rrow("Duct condition", ductConditionLabel) : "") +
           '</table></div>' +
         '</div>' +
+        reportEnvelope(r) +
         '<div class="rp-block"><h2>Cooling load breakdown</h2><table>' +
           rrow("Walls, roof &amp; windows", fmt(cb.conduction) + " BTU/h") +
           rrow("Solar through glass", fmt(cb.solar) + " BTU/h") +
@@ -1270,6 +1382,33 @@
       '<p class="rp-permit-sub">' + escapeHtml(pa.summary) + '</p>' +
       '<table>' + rows + '</table>' + delta +
       '<p class="rp-permit-note">Findings were extracted from the site photos by AI vision analysis and verified against the inputs above; low-confidence observations are listed for reference but did not change the calculation.</p>' +
+    '</div>';
+  }
+
+  /*
+   * Envelope-assumption appendix. The printed report is what a homeowner or a
+   * plans examiner reads without the app in front of them, so it has to say
+   * plainly which envelope numbers were measured and which were inferred —
+   * an inferred R-value presented as fact is how an "engineering report"
+   * quietly becomes wrong.
+   */
+  function reportEnvelope(r) {
+    var env = r.envelope;
+    if (!env) return "";
+    function erow(label, value, src) {
+      return rrow(label, value + " — " + ENV_SRC_LABEL[src]);
+    }
+    var basis = env.basis === "vintage-zone"
+      ? "Year built " + env.yearBuilt + " (" + escapeHtml(env.eraLabel) + ") in IECC climate zone " + env.zone
+      : "Construction-quality tier (no build year and climate zone available)";
+    return '<div class="rp-block"><h2>Envelope assumptions</h2><table>' +
+      rrow("Basis", basis) +
+      erow("Attic insulation", "R-" + env.atticR, env.source.atticR) +
+      erow("Window U-factor", env.windowU.toFixed(2), env.source.windowU) +
+      erow("Window SHGC", env.windowSHGC.toFixed(2), env.source.windowSHGC) +
+      erow("Air leakage", env.ach.toFixed(2) + " ACH", env.source.ach) +
+      '</table>' +
+      '<p class="rp-disc" style="margin-top:6px">Values marked &ldquo;' + ENV_SRC_LABEL.vintage + '&rdquo; are what the energy code in force required for that build year and climate zone — a defensible starting point for the era, not a measurement of this house. Values marked &ldquo;' + ENV_SRC_LABEL.tier + '&rdquo; come from a broad construction-quality bucket and are the loosest assumption in this report. Measured values (attic depth, an NFRC window label, a blower-door test) should replace them before this load is used for a stamped design.</p>' +
     '</div>';
   }
 

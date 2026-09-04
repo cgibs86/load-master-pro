@@ -12,6 +12,18 @@ type/location/sealing condition, and includes an optional return-air sizing
 check against the ~144 sq in/ton field rule — all entered when known and
 falling back to sensible defaults when not.
 
+**EnvelopeIQ** sharpens what "sensible default" means. Given a year built and
+the IECC climate zone (derived on the fly from heating/cooling degree days in
+the same year of hourly weather the design temperatures come from), the
+calculator uses the attic R-value, window U-factor/SHGC and air-tightness the
+energy code of that era actually required in that zone, instead of a single
+broad good/average/poor bucket. Every one of those four numbers is labeled in
+the UI and the printed report as **entered** (measured), **code-era typical**
+(inferred from vintage), or **tier default** (the coarse fallback), so an
+assumption is never presented as a measurement. Precedence, strongest first:
+a number you type > a construction tier you pick or PhotoScan reads > the
+vintage x zone table > the tier default.
+
 > **Estimating tool only.** Results are a Manual J–style approximation for quick
 > sizing guidance — not a stamped engineering report. Confirm final equipment
 > sizing with a licensed HVAC professional.
