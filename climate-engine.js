@@ -13,6 +13,8 @@
  *             = heating and cooling degree days from the same hourly series,
  *               and the IECC/ASHRAE-169 thermal climate zone they imply —
  *               which selects the vintage envelope defaults in loadcalc.js
+ *   tempBins  = 5°F histogram of the hourly temperatures, which drives the
+ *               bin-method annual operating-cost estimate (energy-engine.js)
  *
  * Falls back to the embedded nearest-station table when offline or on error.
  * Exposed as window.ClimateEngine (and globalThis for Node tests).
@@ -60,6 +62,32 @@
     if (days < 300) return null;                   // not enough of a year to index a climate
     var scale = 365 / days;
     return { hdd65: Math.round(hdd * scale), cdd50: Math.round(cdd * scale), days: days };
+  }
+
+  /*
+   * Hourly outdoor-temperature histogram in 5°F bins — the input the bin
+   * method of annual energy estimation needs (OpCost, in energy-engine.js).
+   * Keeping ~30 bin counts instead of 8,760 raw hours makes the result small
+   * enough to live in a share link and the saved-job history.
+   *
+   * Bins are keyed by their LOWER edge (e.g. "70" covers 70.0-74.9°F), and
+   * counts are scaled to a full 8,760-hour year so a short or gappy series
+   * doesn't read as a climate with less weather in it than it has.
+   */
+  var BIN_WIDTH_F = 5;
+  function temperatureBins(temps) {
+    var counts = {}, n = 0;
+    for (var i = 0; i < temps.length; i++) {
+      var v = temps[i];
+      if (typeof v !== "number" || !isFinite(v)) continue;
+      var edge = Math.floor(v / BIN_WIDTH_F) * BIN_WIDTH_F;
+      counts[edge] = (counts[edge] || 0) + 1;
+      n++;
+    }
+    if (n < 4000) return null;
+    var scale = 8760 / n, out = {};
+    Object.keys(counts).forEach(function (k) { out[k] = Math.round(counts[k] * scale); });
+    return out;
   }
 
   /*
@@ -162,7 +190,8 @@
     var zone = dd ? iecczone(dd.hdd65, dd.cdd50) : null;
     return {
       heating99: heating99, cooling1: cooling1, outGrains: outGrains, elevFt: elevFt, hours: t.length,
-      hdd65: dd ? dd.hdd65 : null, cdd50: dd ? dd.cdd50 : null, climateZone: zone
+      hdd65: dd ? dd.hdd65 : null, cdd50: dd ? dd.cdd50 : null, climateZone: zone,
+      tempBins: temperatureBins(temps), binWidthF: BIN_WIDTH_F
     };
   }
 
@@ -229,7 +258,7 @@
 
   var api = {
     percentile: percentile, median: median, grainsFromDewpoint: grainsFromDewpoint, analyze: analyze,
-    degreeDays: degreeDays, iecczone: iecczone,
+    degreeDays: degreeDays, iecczone: iecczone, temperatureBins: temperatureBins, BIN_WIDTH_F: BIN_WIDTH_F,
     fetchElevationUSGS: fetchElevationUSGS, fetchLive: fetchLive
   };
   root.ClimateEngine = api;

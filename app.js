@@ -176,7 +176,8 @@
           // conditions, not a year of temperatures, so the fallback path
           // leaves these null and EnvelopeIQ quietly reverts to the 3-tier
           // quality bucket rather than guessing a zone.
-          hdd65: live.hdd65, cdd50: live.cdd50, climateZone: live.climateZone
+          hdd65: live.hdd65, cdd50: live.cdd50, climateZone: live.climateZone,
+          tempBins: live.tempBins || null
         };
       } else {
         state.climate = {
@@ -302,6 +303,7 @@
       requiredCfm: state.result.equipment.airflowCfm,
       tons: state.result.recommendedTons
     }) : null;
+    computeSales();
   }
 
   // Subscription tier: 0 guest · 1 solo · 2 trial/pro · 3 fleet.
@@ -391,7 +393,8 @@
       detailsBlock(r, c, e, qualityLabel) +
       adjustBlock(e, p) +
 
-      finalRecommendationCard(r, e, c);
+      finalRecommendationCard(r, e, c) +
+      salesCard();
 
     var el = $("#results");
     el.innerHTML = html;
@@ -408,6 +411,7 @@
     wirePhotos();
     wirePermit();
     wireFinalRec();
+    wireSales();
 
     saveActiveToHistory();
     el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1164,6 +1168,378 @@
     });
   }
 
+  // ---------- SalesIQ (Pro/Fleet + trial): replacement proposal builder ----------
+  //
+  // Everything a salesperson needs to close a replacement at the kitchen
+  // table, from numbers the calculator already produced: what the customer's
+  // current unit costs to run and whether it is even the right size, three
+  // right-sized replacement options (single-stage / two-stage / variable, at
+  // the exact tonnage Manual S picks for each), their annual operating cost
+  // from the OpCost bin engine, financing per option, and the number that
+  // actually sells — net monthly cost after energy savings.
+  //
+  // Inputs live in state.overrides.sales so they ride along in share links
+  // and the saved-job history without any extra plumbing; a fresh address
+  // starts a fresh proposal (finishRun resets overrides).
+
+  var SALES_OPTION_DEFAULTS = [
+    { key: "good",   label: "Good",   sub: "Single-stage",       systemType: "single",   seer2: 14.3, afue: 0.80, hspf2: 7.5 },
+    { key: "better", label: "Better", sub: "Two-stage",          systemType: "two",      seer2: 16.0, afue: 0.96, hspf2: 8.5 },
+    { key: "best",   label: "Best",   sub: "Variable-capacity",  systemType: "variable", seer2: 18.0, afue: 0.96, hspf2: 9.5 }
+  ];
+  var SALES_FUEL_LABEL = { furnace: "Gas furnace + A/C", hp: "Heat pump (all-electric)", dualfuel: "Dual fuel (heat pump + gas furnace)" };
+  var EXISTING_HEAT_LABEL = { furnace: "Gas furnace", hp: "Heat pump", resistance: "Electric strips / baseboard", none: "No central heat" };
+
+  function salesDefaults() {
+    var g = state.geo || {};
+    var rates = window.EnergyEngine.ratesForState(g.state);
+    return {
+      existing: { tons: null, year: null, heatType: "furnace", seer: null, afue: null, hspf: null },
+      fuel: "furnace",
+      options: SALES_OPTION_DEFAULTS.map(function (d) { return { seer2: d.seer2, afue: d.afue, hspf2: d.hspf2, price: null, rebate: null }; }),
+      apr: 9.99, months: 120, down: 0,
+      rates: { kwh: rates.kwh, therm: rates.therm, source: rates.national ? "national" : rates.state }
+    };
+  }
+  function salesState() {
+    if (!state.overrides.sales) state.overrides.sales = salesDefaults();
+    return state.overrides.sales;
+  }
+
+  // Runs after every compute(). Cheap (30 bins × 4 systems), so it always
+  // runs — the card shows option costs immediately and adds the "vs. your
+  // current system" column the moment the customer's unit is described.
+  function computeSales() {
+    var r = state.result, c = state.climate;
+    var EE = window.EnergyEngine;
+    if (!r || !c || !EE) { state.salesResult = null; return; }
+    var s = salesState();
+    var bins = c.tempBins || EE.syntheticBins(c.heating99, c.cooling1);
+    var binsLive = !!c.tempBins;
+    var base = {
+      bins: bins, coolingBtu: r.cooling.total, cooling1: c.cooling1,
+      heatingBtu: r.heating.total, heating99: c.heating99, indoorHeat: 70,
+      rates: { kwh: s.rates.kwh, therm: s.rates.therm }
+    };
+    var nowYear = new Date().getFullYear();
+
+    // --- the customer's current system ---
+    var ex = s.existing, existing = null;
+    if (ex.tons > 0) {
+      var seer = ex.seer > 0 ? ex.seer : EE.seerFromYear(ex.year);
+      var derate = EE.ageDerate(ex.year, nowYear);
+      var sys = {
+        coolType: ex.heatType === "hp" ? "hp" : "ac",
+        seer2: EE.seerToSeer2(seer) * derate, tons: ex.tons, systemType: "single",
+        heatType: ex.heatType || "furnace",
+        afue: ex.afue > 0 ? ex.afue : EE.afueFromYear(ex.year),
+        hspf2: EE.hspfToHspf2(ex.hspf > 0 ? ex.hspf : EE.hspfFromYear(ex.year)) * derate
+      };
+      var energy = EE.annualEnergy(Object.assign({}, base, { system: sys }));
+      var age = ex.year > 1900 ? nowYear - ex.year : null;
+      var life = EE.TYPICAL_LIFE_YEARS[ex.heatType === "hp" ? "hp" : "ac"];
+      existing = {
+        tons: ex.tons, year: ex.year, age: age, seer: Math.round(seer * 10) / 10, seerAssumed: !(ex.seer > 0),
+        derate: derate, heatType: sys.heatType, afue: sys.afue, energy: energy,
+        rightSize: EE.rightSize(ex.tons, r.cooling.total / 12000, "single"),
+        lifeNote: age == null ? null : age >= life
+          ? "At " + age + " years this unit is past the ~" + life + "-year typical service life; a failure in peak season is the realistic risk."
+          : "At " + age + " years this unit has roughly " + (life - age) + " years of typical service life left."
+      };
+    }
+
+    // --- the three replacement options ---
+    var options = SALES_OPTION_DEFAULTS.map(function (d, i) {
+      var o = s.options[i] || {};
+      var tons = r.sizing[d.systemType];
+      var sys = {
+        coolType: s.fuel === "furnace" ? "ac" : "hp",
+        seer2: o.seer2 > 0 ? o.seer2 : d.seer2, tons: tons, systemType: d.systemType,
+        heatType: s.fuel, afue: o.afue > 0 ? o.afue : d.afue, hspf2: o.hspf2 > 0 ? o.hspf2 : d.hspf2,
+        furnaceOutputBtu: r.equipment.furnaceOutput
+      };
+      var energy = EE.annualEnergy(Object.assign({}, base, { system: sys }));
+      var price = o.price > 0 ? o.price : null;
+      var rebate = o.rebate > 0 ? o.rebate : 0;
+      var financed = price != null ? Math.max(0, price - rebate - (s.down || 0)) : null;
+      var payment = financed != null ? EE.monthlyPayment(financed, s.apr, s.months) : null;
+      var savings = existing ? existing.energy.totalCost - energy.totalCost : null;
+      return {
+        key: d.key, label: d.label, sub: d.sub, systemType: d.systemType, tons: tons,
+        seer2: sys.seer2, afue: sys.afue, hspf2: sys.hspf2, price: price, rebate: rebate,
+        energy: energy, payment: payment,
+        savingsPerYear: savings,
+        netMonthly: (payment != null && savings != null) ? payment - savings / 12 : null,
+        tenYearCost: price != null ? Math.round(price - rebate + 10 * energy.totalCost) : null
+      };
+    });
+    // Payback of the upgrades against "Good", when prices are in.
+    options.forEach(function (o, i) {
+      var g = options[0];
+      if (i === 0 || o.price == null || g.price == null) { o.paybackYears = null; return; }
+      var dPrice = (o.price - o.rebate) - (g.price - g.rebate);
+      var dSave = g.energy.totalCost - o.energy.totalCost;
+      o.paybackYears = (dPrice > 0 && dSave > 0) ? Math.round(dPrice / dSave * 10) / 10 : (dPrice <= 0 ? 0 : null);
+    });
+
+    state.salesResult = { existing: existing, options: options, fuel: s.fuel, binsLive: binsLive, rates: s.rates, apr: s.apr, months: s.months, down: s.down || 0 };
+  }
+
+  function money(n) { return "$" + Math.round(n).toLocaleString("en-US"); }
+  function moneyOrDash(n) { return n == null ? "—" : money(n); }
+  function salesIcon() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>'; }
+
+  function salesCard() {
+    var g = state.geo || {};
+    if (planTier() < 2) {
+      var cta = planTier() === 0
+        ? '<a class="permit-cta" href="auth.html#signup">Start free trial — unlock SalesIQ</a>'
+        : '<a class="permit-cta" href="index.html#pricing">Upgrade to Pro — unlock SalesIQ</a>';
+      return '' +
+        '<div class="permit-card locked">' +
+          '<div class="hp-head"><span class="ico gold">' + lockIcon() + '</span>SalesIQ™ — replacement proposal<span class="permit-badge">PRO</span></div>' +
+          '<p class="hp-text">Show the customer what their current unit costs to run, whether it\'s even the right size, and three right-sized replacement options with annual operating cost, financing, and the net monthly cost after energy savings — built from this home\'s own load and a year of its own weather.</p>' +
+          '<div class="permit-teaser"><div class="tz-row"></div><div class="tz-row w70"></div><div class="tz-row w85"></div><div class="tz-row w60"></div></div>' +
+          cta +
+        '</div>';
+    }
+    var s = salesState(), sr = state.salesResult, r = state.result;
+    if (!sr) return "";
+    var ex = s.existing;
+    function num(id, val, attrs, ph) {
+      return '<input type="number" id="' + id + '" ' + (attrs || "") + ' value="' + (val != null ? val : "") + '"' + (ph ? ' placeholder="' + escapeHtml(ph) + '"' : "") + ' />';
+    }
+    function sel(id, val, opts) {
+      return '<select id="' + id + '">' + opts.map(function (o) { return '<option value="' + o[0] + '"' + (String(o[0]) === String(val) ? " selected" : "") + '>' + o[1] + '</option>'; }).join("") + '</select>';
+    }
+    var tonsOpts = [["", "Not sure"]].concat([1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 6].map(function (t) { return [t, t + " ton"]; }));
+    var showAfue = s.fuel !== "hp", showHspf = s.fuel !== "furnace";
+
+    var optionCols = SALES_OPTION_DEFAULTS.map(function (d, i) {
+      var o = s.options[i] || {};
+      return '<div class="sq-opt-col">' +
+        '<div class="sq-opt-name">' + d.label + '<span>' + d.sub + ' · ' + r.sizing[d.systemType] + ' ton</span></div>' +
+        '<label>SEER2</label>' + num("sqSeer" + i, o.seer2 != null ? o.seer2 : d.seer2, 'min="10" max="30" step="0.1"') +
+        (showAfue ? '<label>AFUE</label>' + num("sqAfue" + i, o.afue != null ? o.afue : d.afue, 'min="0.6" max="0.99" step="0.01"') : "") +
+        (showHspf ? '<label>HSPF2</label>' + num("sqHspf" + i, o.hspf2 != null ? o.hspf2 : d.hspf2, 'min="5" max="14" step="0.1"') : "") +
+        '<label>Installed price</label>' + num("sqPrice" + i, o.price, 'min="0" step="100"', "your quote") +
+        '<label>Rebates / credits</label>' + num("sqRebate" + i, o.rebate, 'min="0" step="50"', "utility, mfr, tax") +
+      '</div>';
+    }).join("");
+
+    // ----- results -----
+    var exHtml = "";
+    if (sr.existing) {
+      var e2 = sr.existing, rs = e2.rightSize;
+      var verdictCls = rs ? (rs.verdict === "right-sized" ? "ok" : rs.verdict === "undersized" ? "warn" : "bad") : "";
+      exHtml =
+        '<div class="sq-existing">' +
+          '<div class="sq-ex-head">Customer\'s current system<span class="sq-ex-cost">' + money(e2.energy.totalCost) + '<em>/yr to run</em></span></div>' +
+          (rs ? '<div class="sq-verdict ' + verdictCls + '"><b>' + rs.pct + '% of the calculated load — ' + rs.verdict + '.</b> ' + escapeHtml(rs.message) + '</div>' : "") +
+          '<div class="sq-ex-meta">' + e2.tons + '-ton ' + (e2.heatType === "hp" ? "heat pump" : "A/C") + (e2.year ? ' installed ' + e2.year : "") +
+            ' · ~' + e2.seer + ' SEER' + (e2.seerAssumed ? ' (typical for its age)' : "") +
+            (e2.derate < 1 ? ', running ~' + Math.round((1 - e2.derate) * 100) + '% below nameplate from age' : "") +
+            ' · ' + EXISTING_HEAT_LABEL[e2.heatType] + (e2.heatType === "furnace" ? ' ' + Math.round(e2.afue * 100) + '% AFUE' : "") +
+            ' · cooling ' + money(e2.energy.cooling.cost) + ' + heating ' + money(e2.energy.heating.cost) + ' per year' +
+            (e2.lifeNote ? '<br/>' + escapeHtml(e2.lifeNote) : "") +
+          '</div>' +
+        '</div>';
+    }
+
+    var haveExisting = !!sr.existing, havePrices = sr.options.some(function (o) { return o.price != null; });
+    var resultCols = sr.options.map(function (o) {
+      var headline = o.netMonthly != null ? money(o.netMonthly) + '<em>/mo net</em>'
+        : o.payment != null ? money(o.payment) + '<em>/mo</em>'
+        : money(o.energy.totalCost) + '<em>/yr to run</em>';
+      return '<div class="sq-res-col ' + o.key + '">' +
+        '<div class="sq-res-name">' + o.label + '<span>' + o.sub + ' · ' + o.tons + ' ton</span></div>' +
+        '<div class="sq-res-headline">' + headline + '</div>' +
+        '<div class="eq-row"><span>Runs for</span><b>' + money(o.energy.totalCost) + '/yr</b></div>' +
+        (haveExisting ? '<div class="eq-row"><span>vs. current</span><b class="' + (o.savingsPerYear > 0 ? "good" : "bad") + '">' + (o.savingsPerYear >= 0 ? "saves " : "costs ") + money(Math.abs(o.savingsPerYear)) + '/yr</b></div>' : "") +
+        (o.payment != null ? '<div class="eq-row"><span>Payment</span><b>' + money(o.payment) + '/mo</b></div>' : "") +
+        (o.netMonthly != null ? '<div class="eq-row"><span>After savings</span><b>' + money(o.netMonthly) + '/mo</b></div>' : "") +
+        (o.tenYearCost != null ? '<div class="eq-row"><span>10-yr cost to own</span><b>' + money(o.tenYearCost) + '</b></div>' : "") +
+        (o.paybackYears != null ? '<div class="eq-row"><span>Pays back vs. Good</span><b>' + (o.paybackYears === 0 ? "immediately" : o.paybackYears + " yrs") + '</b></div>' : "") +
+        (o.energy.heating.switchoverF != null ? '<div class="eq-row"><span>Furnace takes over</span><b>below ' + o.energy.heating.switchoverF + '°F</b></div>' : "") +
+        (s.fuel === "hp" && o.energy.heating.auxKwh > 0 ? '<div class="eq-row"><span>Backup strips</span><b>' + fmt(o.energy.heating.auxKwh) + ' kWh/yr</b></div>' : "") +
+      '</div>';
+    }).join("");
+
+    var talkTrack = salesTalkTrack(sr);
+    var ratesNote = sr.rates.source === "national"
+      ? "Rates are a national average — enter the customer's actual bill rates."
+      : "Rates start from a typical " + sr.rates.source + " average — enter the customer's actual bill rates for a tighter number.";
+
+    return '' +
+      '<div class="permit-card sq-card" id="salesCard">' +
+        '<div class="hp-head"><span class="ico gold">' + salesIcon() + '</span>SalesIQ™ — replacement proposal<span class="permit-badge on">PRO</span></div>' +
+        '<p class="hp-text">Operating costs come from this home\'s calculated load run through ' + (sr.binsLive ? 'a full year of on-site hourly weather' : 'a temperature profile estimated from the design conditions') + ' (bin method), with each unit\'s efficiency evaluated at the outdoor temperature it actually runs at.</p>' +
+
+        '<div class="adjust sq-form">' +
+          '<div class="sq-section">Customer\'s current system</div>' +
+          '<div class="adjust-row">' +
+            '<div><label>Cooling size</label>' + sel("sqExTons", ex.tons, tonsOpts) + '</div>' +
+            '<div><label>Year installed</label>' + num("sqExYear", ex.year, 'min="1970" max="2030" step="1"', "e.g. 2008") + '</div>' +
+          '</div>' +
+          '<div class="adjust-row">' +
+            '<div><label>Heating</label>' + sel("sqExHeat", ex.heatType, Object.keys(EXISTING_HEAT_LABEL).map(function (k) { return [k, EXISTING_HEAT_LABEL[k]]; })) + '</div>' +
+            '<div><label>SEER (nameplate, optional)</label>' + num("sqExSeer", ex.seer, 'min="6" max="30" step="0.5"', "blank = typical for its age") + '</div>' +
+          '</div>' +
+          '<div class="adjust-row">' +
+            '<div><label>Furnace AFUE (optional)</label>' + num("sqExAfue", ex.afue, 'min="0.5" max="0.99" step="0.01"', "blank = 80%") + '</div>' +
+            '<div><label>Heat pump HSPF (optional)</label>' + num("sqExHspf", ex.hspf, 'min="5" max="14" step="0.1"', "blank = typical") + '</div>' +
+          '</div>' +
+
+          '<div class="sq-section">Utility rates <span class="sq-hint">' + escapeHtml(ratesNote) + '</span></div>' +
+          '<div class="adjust-row">' +
+            '<div><label>Electricity ($/kWh)</label>' + num("sqKwh", Math.round(s.rates.kwh * 1000) / 1000, 'min="0.03" max="1" step="0.001"') + '</div>' +
+            '<div><label>Natural gas ($/therm)</label>' + num("sqTherm", Math.round(s.rates.therm * 100) / 100, 'min="0.3" max="10" step="0.01"') + '</div>' +
+          '</div>' +
+
+          '<div class="sq-section">Replacement options</div>' +
+          '<label>System type for all three options</label>' +
+          sel("sqFuel", s.fuel, Object.keys(SALES_FUEL_LABEL).map(function (k) { return [k, SALES_FUEL_LABEL[k]]; })) +
+          '<div class="sq-opt-grid">' + optionCols + '</div>' +
+
+          '<div class="sq-section">Financing</div>' +
+          '<div class="sq-fin-row">' +
+            '<div><label>APR %</label>' + num("sqApr", s.apr, 'min="0" max="40" step="0.01"') + '</div>' +
+            '<div><label>Term (months)</label>' + num("sqMonths", s.months, 'min="6" max="240" step="6"') + '</div>' +
+            '<div><label>Down payment</label>' + num("sqDown", s.down || null, 'min="0" step="100"', "0") + '</div>' +
+          '</div>' +
+          '<button class="recalc" id="salesBuildBtn">Build proposal</button>' +
+        '</div>' +
+
+        '<div class="sq-results" id="salesResults">' +
+          exHtml +
+          '<div class="sq-res-grid">' + resultCols + '</div>' +
+          (talkTrack ? '<div class="sq-talk"><b>Talk track</b>' + talkTrack + '</div>' : "") +
+          '<p class="sq-foot">' + (haveExisting ? "" : "Add the customer's current unit above to see what they're paying now and whether it's the right size. ") +
+            (havePrices ? "" : "Enter your installed prices to see monthly payments, net monthly cost after savings, and 10-year cost of ownership. ") +
+            'Operating costs are an engineering estimate for comparing options on this house at the rates above — not a bill guarantee. Efficiency assumptions: ' + (s.fuel === "furnace" ? "A/C SEER2 with a furnace at the AFUE shown" : s.fuel === "hp" ? "heat pump SEER2/HSPF2 with electric backup below its balance point" : "heat pump above the switchover temperature, gas furnace below it") + '.</p>' +
+        '</div>' +
+      '</div>';
+  }
+
+  // Plain-English sentences the salesperson can read out, generated only
+  // from what is actually true of this comparison — no line is emitted
+  // unless the numbers back it.
+  function salesTalkTrack(sr) {
+    var lines = [];
+    var ex = sr.existing, opts = sr.options;
+    if (ex) {
+      var rs = ex.rightSize;
+      if (rs && rs.verdict !== "right-sized") {
+        lines.push(rs.verdict === "undersized"
+          ? "Your current " + ex.tons + "-ton unit is undersized for this house — it isn't a maintenance problem, it's a capacity problem, and a bigger unit of the same efficiency would fix comfort but not the bill."
+          : "Your current " + ex.tons + "-ton unit is " + rs.pct + "% of what this house actually needs. Oversized systems cool the thermostat fast and shut off before they dry the air, which is why the house can feel cold and sticky at the same time — and short-cycling like that is hard on compressors.");
+      }
+      var best = opts.reduce(function (a, b) { return b.energy.totalCost < a.energy.totalCost ? b : a; });
+      if (best.savingsPerYear > 100) {
+        lines.push("You're spending about " + money(ex.energy.totalCost) + " a year to heat and cool this house now. The " + best.label + " option runs it for about " + money(best.energy.totalCost) + " — roughly " + money(best.savingsPerYear) + " a year back in your pocket, at today's rates.");
+      }
+      if (ex.lifeNote && ex.age != null && ex.age >= 12) lines.push(ex.lifeNote + " Replacing on your schedule instead of the unit's means you choose the price and the week.");
+    }
+    var withNet = opts.filter(function (o) { return o.netMonthly != null; });
+    if (withNet.length >= 2) {
+      var cheapest = withNet.reduce(function (a, b) { return b.netMonthly < a.netMonthly ? b : a; });
+      var good = opts[0];
+      if (cheapest.key !== "good" && good.netMonthly != null) {
+        lines.push("On a monthly basis the " + cheapest.label + " option is actually the cheapest to own: after energy savings it nets out at " + money(cheapest.netMonthly) + " a month versus " + money(good.netMonthly) + " for Good, because the extra efficiency pays part of its own note.");
+      }
+    }
+    var ten = opts.filter(function (o) { return o.tenYearCost != null; });
+    if (ten.length >= 2) {
+      var lowTen = ten.reduce(function (a, b) { return b.tenYearCost < a.tenYearCost ? b : a; });
+      var highTen = ten.reduce(function (a, b) { return b.tenYearCost > a.tenYearCost ? b : a; });
+      if (lowTen.key !== highTen.key && highTen.tenYearCost - lowTen.tenYearCost > 500) {
+        lines.push("Over ten years, counting energy, " + lowTen.label + " costs " + money(highTen.tenYearCost - lowTen.tenYearCost) + " less to own than " + highTen.label + ".");
+      }
+    }
+    if (sr.fuel === "hp") {
+      var strips = opts.filter(function (o) { return o.energy.heating.auxKwh > 0.25 * o.energy.heating.kwh; });
+      if (strips.length === opts.length) lines.push("In this climate an all-electric heat pump sized for cooling leans heavily on backup strips in winter — worth pricing the dual-fuel version alongside it.");
+    }
+    return lines.length ? lines.map(function (l) { return '<p>' + escapeHtml(l) + '</p>'; }).join("") : "";
+  }
+
+  function wireSales() {
+    var btn = $("#salesBuildBtn");
+    if (!btn) return;
+    var s = salesState();
+    function numVal(id) { var el = $("#" + id); if (!el) return null; var v = parseFloat(el.value); return isFinite(v) ? v : null; }
+    function readInputs() {
+      var tonsEl = $("#sqExTons");
+      s.existing.tons = tonsEl && tonsEl.value ? parseFloat(tonsEl.value) : null;
+      var y = numVal("sqExYear"); s.existing.year = (y >= 1900 && y <= 2100) ? Math.round(y) : null;
+      var heatEl = $("#sqExHeat"); s.existing.heatType = heatEl ? heatEl.value : "furnace";
+      s.existing.seer = numVal("sqExSeer"); s.existing.afue = numVal("sqExAfue"); s.existing.hspf = numVal("sqExHspf");
+      var kwh = numVal("sqKwh"), therm = numVal("sqTherm");
+      if (kwh > 0) s.rates.kwh = kwh;
+      if (therm > 0) s.rates.therm = therm;
+      var fuelEl = $("#sqFuel"); s.fuel = fuelEl ? fuelEl.value : s.fuel;
+      SALES_OPTION_DEFAULTS.forEach(function (d, i) {
+        s.options[i] = s.options[i] || {};
+        var v;
+        v = numVal("sqSeer" + i); if (v != null) s.options[i].seer2 = v;
+        v = numVal("sqAfue" + i); if (v != null) s.options[i].afue = v;
+        v = numVal("sqHspf" + i); if (v != null) s.options[i].hspf2 = v;
+        s.options[i].price = numVal("sqPrice" + i);
+        s.options[i].rebate = numVal("sqRebate" + i);
+      });
+      var apr = numVal("sqApr"); if (apr != null && apr >= 0) s.apr = apr;
+      var months = numVal("sqMonths"); if (months >= 1) s.months = Math.round(months);
+      var down = numVal("sqDown"); s.down = down != null && down >= 0 ? down : 0;
+    }
+    btn.addEventListener("click", function () {
+      readInputs();
+      computeSales();
+      render();
+      var card = $("#salesResults");
+      if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    // Switching fuel changes which efficiency fields make sense — rebuild the
+    // option columns straight away rather than waiting for the button.
+    var fuelEl = $("#sqFuel");
+    if (fuelEl) fuelEl.addEventListener("change", function () {
+      readInputs();
+      computeSales();
+      render();
+      var card = $("#salesCard");
+      if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+
+  // Printed proposal page for the homeowner — only when the salesperson has
+  // actually built one (an existing system or at least one price entered).
+  function reportProposal() {
+    var sr = state.salesResult;
+    if (!sr || planTier() < 2) return "";
+    var s = salesState();
+    var built = !!sr.existing || sr.options.some(function (o) { return o.price != null; });
+    if (!built) return "";
+    var head = '<tr><th></th>' + sr.options.map(function (o) { return '<th>' + o.label + '<br/><small>' + o.sub + ' · ' + o.tons + ' ton</small></th>'; }).join("") + '</tr>';
+    function row(label, fn) { return '<tr><td>' + label + '</td>' + sr.options.map(function (o) { return '<td>' + fn(o) + '</td>'; }).join("") + '</tr>'; }
+    var eff = row("Efficiency", function (o) {
+      return o.seer2 + " SEER2" + (sr.fuel !== "hp" ? " · " + Math.round(o.afue * 100) + "% AFUE" : "") + (sr.fuel !== "furnace" ? " · " + o.hspf2 + " HSPF2" : "");
+    });
+    return '<div class="rp-block rp-proposal"><h2>Replacement proposal — ' + escapeHtml(SALES_FUEL_LABEL[sr.fuel]) + '</h2>' +
+      (sr.existing ? '<p class="rp-permit-note"><b>Current system:</b> ' + sr.existing.tons + '-ton ' + (sr.existing.heatType === "hp" ? "heat pump" : "A/C") + (sr.existing.year ? " installed " + sr.existing.year : "") +
+        ', ~' + sr.existing.seer + ' SEER · estimated ' + money(sr.existing.energy.totalCost) + '/yr to run' +
+        (sr.existing.rightSize ? ' · ' + sr.existing.rightSize.pct + '% of calculated load (' + sr.existing.rightSize.verdict + ')' : "") + '</p>' : "") +
+      '<table class="rp-prop-table">' + head + eff +
+        row("Estimated annual operating cost", function (o) { return money(o.energy.totalCost); }) +
+        (sr.existing ? row("Annual savings vs. current", function (o) { return (o.savingsPerYear >= 0 ? "" : "−") + money(Math.abs(o.savingsPerYear)); }) : "") +
+        row("Installed price", function (o) { return moneyOrDash(o.price); }) +
+        (sr.options.some(function (o) { return o.rebate > 0; }) ? row("Rebates / credits", function (o) { return o.rebate > 0 ? "−" + money(o.rebate) : "—"; }) : "") +
+        (sr.options.some(function (o) { return o.payment != null; }) ? row("Monthly payment (" + sr.apr + "% · " + sr.months + " mo" + (sr.down > 0 ? " · " + money(sr.down) + " down" : "") + ")", function (o) { return o.payment != null ? money(o.payment) + "/mo" : "—"; }) : "") +
+        (sr.options.some(function (o) { return o.netMonthly != null; }) ? row("Net monthly after energy savings", function (o) { return o.netMonthly != null ? money(o.netMonthly) + "/mo" : "—"; }) : "") +
+        (sr.options.some(function (o) { return o.tenYearCost != null; }) ? row("10-year cost of ownership", function (o) { return moneyOrDash(o.tenYearCost); }) : "") +
+      '</table>' +
+      '<p class="rp-disc" style="margin-top:6px">Operating costs are an engineering estimate from this home\'s calculated load and ' + (sr.binsLive ? 'a year of on-site hourly weather' : 'a temperature profile estimated from local design conditions') + ' at $' + s.rates.kwh.toFixed(3) + '/kWh and $' + s.rates.therm.toFixed(2) + '/therm, for comparing options against each other. Actual bills depend on thermostat settings, occupancy, duct condition and future utility rates. Financing figures are illustrative; final terms are set by the lender.</p>' +
+    '</div>';
+  }
+
   // ---------- History (saved jobs, on-device) ----------
   var HISTORY_KEY = "lmp_history_v1";
   var activeHistoryId = null;
@@ -1338,6 +1714,7 @@
           rrow("Sensible / latent split", fmt(r.cooling.sensible) + " / " + fmt(r.cooling.latent) + " BTU/h") +
         '</table></div>' +
         reportReturnAir() +
+        reportProposal() +
         reportPhotos() +
         reportPhotoInsights() +
         (opts.permit ? reportPermitSection() : "") +

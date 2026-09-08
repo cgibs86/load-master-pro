@@ -24,6 +24,22 @@ assumption is never presented as a measurement. Precedence, strongest first:
 a number you type > a construction tier you pick or PhotoScan reads > the
 vintage x zone table > the tier default.
 
+**SalesIQ** (Pro) turns the load into a replacement proposal. An OpCost
+bin-method engine (`energy-engine.js`) runs the calculated load through a
+5°F histogram of the same year of on-site hourly weather TrueClimate already
+fetched, evaluating each unit's efficiency and capacity at the outdoor
+temperature it actually runs at: A/C EER slides with temperature from its
+SEER2 anchor, heat-pump COP and capacity fall with cold, backup strips or a
+dual-fuel furnace cover the shortfall. It estimates what the customer's
+current unit costs to run (nameplate efficiency inferred from install year
+when unknown, with an age derate), checks whether that unit was ever the
+right size against Manual S bands, and lays out Good / Better / Best at the
+tonnage Manual S picks for each stage type — with the rep's own prices,
+rebates and financing terms turned into monthly payment, net monthly cost
+after energy savings, payback and 10-year cost of ownership. Utility rates
+start from typical state averages and are meant to be overwritten from the
+customer's bill.
+
 > **Estimating tool only.** Results are a Manual J–style approximation for quick
 > sizing guidance — not a stamped engineering report. Confirm final equipment
 > sizing with a licensed HVAC professional.
