@@ -102,6 +102,20 @@ console.log("\n=== Existing-system estimation ===");
   ok("...but inside the variable-capacity 130% ceiling", E.rightSize(3, 2.3, "variable").verdict === "right-sized");
   ok("2-ton on a 2.6-ton load is undersized", E.rightSize(2, 2.6, "single").verdict === "undersized");
   ok("missing inputs return null, not a throw", E.rightSize(0, 2.6, "single") === null && E.rightSize(3, null, "single") === null);
+  // The dry-climate additive allowance must match loadcalc.js manualSCeiling()
+  // exactly, or the same report could select a size it then calls oversized.
+  const LC = require("../loadcalc.js");
+  [1.2, 1.8, 2.4, 3.0, 4.2].forEach(function (load) {
+    ["single", "two", "variable"].forEach(function (type) {
+      [undefined, 0.97].forEach(function (jshr) {
+        const lcPct = Math.round(LC.manualSCeiling(load, type, jshr) * 100);
+        const eePct = E.rightSize(load, load, type, jshr).ceilingPct;
+        ok(`ceiling agrees with loadcalc: ${load}t ${type}${jshr ? " dry" : ""}`, Math.abs(lcPct - eePct) <= 1, `loadcalc ${lcPct}% vs energy ${eePct}%`);
+      });
+    });
+  });
+  ok("a dry-climate unit the sizer would pick is not called oversized", E.rightSize(2.5, 2.0, "single", 0.97).verdict === "right-sized", JSON.stringify(E.rightSize(2.5, 2.0, "single", 0.97).verdict));
+  ok("...but the same unit in a humid climate is oversized", E.rightSize(2.5, 2.0, "single", 0.75).verdict === "oversized");
 }
 
 console.log("\n=== Financing ===");

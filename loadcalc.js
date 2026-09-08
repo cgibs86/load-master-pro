@@ -728,7 +728,7 @@
     };
   }
 
-  const api = { compute, qualityFromYear, envelopeFromVintage, airFactor, balancePoint, sizeFor, manualSFit, shrCheck, resolveDuctFactor, returnAirCheck, QUALITY, DEFAULTS, VINTAGE_ENVELOPE };
+  const api = { compute, qualityFromYear, envelopeFromVintage, airFactor, balancePoint, sizeFor, manualSCeiling, manualSFit, shrCheck, resolveDuctFactor, returnAirCheck, QUALITY, DEFAULTS, VINTAGE_ENVELOPE };
   root.LoadCalc = api;
   if (typeof module !== "undefined" && module.exports) {
     module.exports = api;

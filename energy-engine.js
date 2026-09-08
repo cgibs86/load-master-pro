@@ -305,10 +305,18 @@
    * load, a verdict, and plain-English consequences a salesperson can say
    * out loud without overstating them.
    */
-  function rightSize(existingTons, loadTons, systemType) {
+  function rightSize(existingTons, loadTons, systemType, jshr) {
     if (!(existingTons > 0) || !(loadTons > 0)) return null;
     var pct = Math.round(existingTons / loadTons * 100);
-    var ceilingPct = systemType === "variable" ? 130 : systemType === "two" ? 125 : (loadTons <= 2 ? 120 : 115);
+    // Mirrors loadcalc.js manualSCeiling() exactly, including the dry-climate
+    // additive allowance. It has to: the sizing engine and this check appear
+    // in the same report, so a unit the calculator would happily select must
+    // never be labelled "oversized" here. Keep the two in step if either moves.
+    var isDry = typeof jshr === "number" && isFinite(jshr) && jshr >= 0.95;
+    var ceilingPct = systemType === "variable" ? 130
+      : systemType === "two" ? 125
+      : isDry ? Math.round((loadTons + 0.5) / loadTons * 100)
+      : (loadTons <= 2 ? 120 : 115);
     var verdict, message;
     if (pct < 90) {
       verdict = "undersized";

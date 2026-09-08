@@ -1266,7 +1266,12 @@
       existing = {
         tons: ex.tons, year: ex.year, age: age, seer: Math.round(seer * 10) / 10, seerAssumed: !(ex.seer > 0),
         derate: derate, heatType: sys.heatType, afue: sys.afue, energy: energy,
-        rightSize: EE.rightSize(ex.tons, r.cooling.total / 12000, "single"),
+        // Compared against the calculated LOAD (not the size the app would
+        // select), with the Manual J SHR passed through so a dry climate's
+        // additive allowance applies here exactly as it does in the sizing
+        // engine — otherwise the report could select a size it also calls
+        // oversized.
+        rightSize: EE.rightSize(ex.tons, r.cooling.total / 12000, "single", r.shr && r.shr.shr),
         lifeNote: age == null ? null : age >= life
           ? "At " + age + " years this unit is past the ~" + life + "-year typical service life; a failure in peak season is the realistic risk."
           : "At " + age + " years this unit has roughly " + (life - age) + " years of typical service life left."
@@ -1310,7 +1315,13 @@
     state.salesResult = { existing: existing, options: options, fuel: s.fuel, binsLive: binsLive, rates: s.rates, apr: s.apr, months: s.months, down: s.down || 0 };
   }
 
-  function money(n) { return "$" + Math.round(n).toLocaleString("en-US"); }
+  // Negative money reads as "−$23", never "$-23" — this shows up whenever
+  // energy savings exceed the monthly payment, which is the single best
+  // number on the page and must not look like a typo.
+  function money(n) {
+    var v = Math.round(n || 0);
+    return (v < 0 ? "\u2212$" : "$") + Math.abs(v).toLocaleString("en-US");
+  }
   function moneyOrDash(n) { return n == null ? "—" : money(n); }
   function salesIcon() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>'; }
 

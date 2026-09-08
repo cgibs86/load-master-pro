@@ -1,5 +1,5 @@
 /* LoadMaster Pro AI — offline service worker */
-var CACHE = "loadmasterproai-v21";
+var CACHE = "loadmasterproai-v22";
 var ASSETS = [
   "./",
   "./index.html",
@@ -11,6 +11,7 @@ var ASSETS = [
   "./loadcalc.js",
   "./ai-providers.js",
   "./photo-ai.js",
+  "./config.js",
   "./climate-data.js",
   "./permits-data.js",
   "./climate-engine.js",
@@ -19,6 +20,7 @@ var ASSETS = [
   "./icons/icon.svg",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
+  "./icons/maskable-512.png",
   "./icons/apple-touch-icon.png"
 ];
 
