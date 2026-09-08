@@ -40,6 +40,25 @@ after energy savings, payback and 10-year cost of ownership. Utility rates
 start from typical state averages and are meant to be overwritten from the
 customer's bill.
 
+**RoomIQ** (Pro) answers the question the customer actually called about.
+Enter the rooms and how many supply registers each has, and `room-loads.js`
+splits the whole-house load by each room's own glass area, orientation,
+exterior exposure, roof or floor contact and use, then apportions supply air
+by sensible load and compares it to what those registers can deliver. Room
+loads are scaled so they sum exactly to the whole-house figures on the same
+report, so the room breakdown can never contradict the tonnage; what the room
+math decides is each room's share, not the size of the total. It flags rooms
+that are starved of air, rooms that are over-supplied and could give air back,
+west-facing glass, and rooms sandwiched between unconditioned spaces, then
+writes the diagnosis in sentences a rep can read out loud.
+
+**Price book** (Settings) is the shop's own equipment and pricing, saved once
+on the device. `price-book.js` matches a line by tier, fuel and stage, prices
+it at the exact tonnage Manual S picked for that stage type (flat, base plus
+per-ton, or an explicit price per stocked size), and SalesIQ fills every
+proposal from it automatically. A figure the rep types on a job always wins,
+so opening a saved job never rewrites what it was quoted at.
+
 > **Estimating tool only.** Results are a Manual J–style approximation for quick
 > sizing guidance — not a stamped engineering report. Confirm final equipment
 > sizing with a licensed HVAC professional.
@@ -68,8 +87,8 @@ npm start
 ### Tests
 
 ```bash
-npm test                # 206 hermetic unit checks: load engine, climate engine, energy engine, AI providers, permit search, PhotoScan
-npm run audit:browser   # live-browser regression: full app flow, EnvelopeIQ, SalesIQ, nameplate -> SalesIQ (needs network + Playwright's Chromium)
+npm test                # 329 hermetic unit checks: load engine, climate engine, energy engine, AI providers, permit search, PhotoScan
+npm run audit:browser   # live-browser regression: full app flow, EnvelopeIQ, SalesIQ, nameplate, layout/print, RoomIQ, price book (needs network + Playwright's Chromium)
 ```
 
 ## Pro: permit & code search

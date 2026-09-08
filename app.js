@@ -304,6 +304,7 @@
       tons: state.result.recommendedTons
     }) : null;
     computeSales();
+    computeRooms();
   }
 
   // Subscription tier: 0 guest · 1 solo · 2 trial/pro · 3 fleet.
@@ -394,6 +395,7 @@
       adjustBlock(e, p) +
 
       finalRecommendationCard(r, e, c) +
+      roomCard() +
       salesCard();
 
     var el = $("#results");
@@ -412,6 +414,7 @@
     wirePermit();
     wireFinalRec();
     wireSales();
+    wireRooms();
 
     saveActiveToHistory();
     el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1189,8 +1192,315 @@
       requestAnimationFrame(step);
     });
     requestAnimationFrame(function () {
-      document.querySelectorAll(".bar-fill").forEach(function (el) { el.style.width = (el.getAttribute("data-w") || 0) + "%"; });
+      document.querySelectorAll(".bar-fill, .rq-bar-fill").forEach(function (el) { el.style.width = (el.getAttribute("data-w") || 0) + "%"; });
     });
+  }
+
+  // ---------- Price book (Settings): the shop's own equipment and pricing ----------
+  //
+  // Saved once on the device, then SalesIQ fills itself on every job at the
+  // exact tonnage Manual S picked for each stage type. A rep who has filled
+  // this in never types a price at a kitchen table again.
+
+  function priceBookGroupHtml() {
+    var book = window.PriceBook.load();
+    var PB = window.PriceBook;
+    var rows = book.entries.map(function (e, i) {
+      var priceLabel = e.pricing === "flat" ? (e.flatPrice != null ? money(e.flatPrice) + " flat" : "no price set")
+        : e.pricing === "perTon" ? money(e.basePrice || 0) + " + " + money(e.perTon || 0) + "/ton"
+        : Object.keys(e.bySize).length + " sizes priced";
+      var eff = [e.seer2 ? e.seer2 + " SEER2" : null, e.afue ? Math.round(e.afue * 100) + "% AFUE" : null, e.hspf2 ? e.hspf2 + " HSPF2" : null].filter(Boolean).join(" · ");
+      return '<div class="pb-row" data-i="' + i + '">' +
+        '<div class="pb-row-main">' +
+          '<b>' + escapeHtml(e.name) + '</b>' +
+          '<span>' + PB.TIER_LABEL[e.tier] + ' · ' + PB.STAGE_LABEL[e.stage] + ' · ' + PB.FUEL_LABEL[e.fuel] + '</span>' +
+          '<span>' + escapeHtml(priceLabel) + (eff ? ' · ' + escapeHtml(eff) : "") + (e.rebate ? ' · ' + money(e.rebate) + ' rebate' : "") + '</span>' +
+        '</div>' +
+        '<button class="pb-del" data-pbdel="' + i + '" title="Remove" aria-label="Remove">×</button>' +
+      '</div>';
+    }).join("");
+
+    return '' +
+      '<div class="set-group"><div class="set-title">Price book' + (planTier() < 2 ? ' <span class="permit-badge">PRO</span>' : '') + '</div>' +
+      (planTier() < 2
+        ? '<p class="sub"><span class="ico gold">' + lockIcon() + '</span> The price book fills SalesIQ proposals automatically. You can build it now; it applies once you upgrade.</p>'
+        : '<p class="sub">Your equipment and pricing, saved on this device. SalesIQ fills each proposal from it at the exact tonnage this house needs, so you never type a price at the kitchen table.</p>') +
+      '<div class="pb-list" id="pbList">' + (rows || '<p class="pb-empty">No equipment saved yet. Add your lines below, or start from a template and edit the prices.</p>') + '</div>' +
+      '<div class="pb-add" id="pbAdd">' +
+        '<label>Add equipment</label>' +
+        '<input type="text" id="pbName" placeholder="e.g. Carrier Infinity 24VNA6" />' +
+        '<div class="set-two">' +
+          '<div><label>Tier</label>' + selectHtml("pbTier", "good", PB.TIERS.map(function (t) { return [t, PB.TIER_LABEL[t]]; })) + '</div>' +
+          '<div><label>Stage</label>' + selectHtml("pbStage", "single", PB.STAGES.map(function (t) { return [t, PB.STAGE_LABEL[t]]; })) + '</div>' +
+        '</div>' +
+        '<div class="set-two">' +
+          '<div><label>System type</label>' + selectHtml("pbFuel", "furnace", PB.FUELS.map(function (t) { return [t, PB.FUEL_LABEL[t]]; })) + '</div>' +
+          '<div><label>Pricing</label>' + selectHtml("pbPricing", "perTon", [["perTon", "Base + per ton"], ["flat", "One flat price"]]) + '</div>' +
+        '</div>' +
+        '<div class="set-two" id="pbPerTonWrap">' +
+          '<div><label>Base price</label><input type="number" id="pbBase" min="0" step="100" placeholder="4500" /></div>' +
+          '<div><label>Per ton</label><input type="number" id="pbPerTon" min="0" step="100" placeholder="1800" /></div>' +
+        '</div>' +
+        '<div id="pbFlatWrap" style="display:none"><label>Installed price</label><input type="number" id="pbFlat" min="0" step="100" placeholder="12000" /></div>' +
+        '<div class="set-two">' +
+          '<div><label>SEER2</label><input type="number" id="pbSeer" min="10" max="40" step="0.1" placeholder="16" /></div>' +
+          '<div><label>AFUE % / HSPF2</label><input type="number" id="pbEff2" min="0" max="100" step="0.1" placeholder="96 or 8.5" /></div>' +
+        '</div>' +
+        '<div><label>Standing rebate or credit</label><input type="number" id="pbRebate" min="0" step="50" placeholder="0" /></div>' +
+        '<div class="pb-btns">' +
+          '<button class="pb-btn" id="pbAddBtn">Add to price book</button>' +
+          (book.entries.length ? "" : '<button class="pb-btn ghost" id="pbSeedBtn">Start from a template</button>') +
+        '</div>' +
+      '</div>' +
+      '<div class="status">' + (book.entries.length
+        ? "✓ " + book.entries.length + " item" + (book.entries.length === 1 ? "" : "s") + " saved on this device. SalesIQ uses them automatically."
+        : "Nothing saved yet — SalesIQ will ask you to type prices until you add your equipment here.") + '</div>' +
+      '</div>';
+  }
+
+  function wirePriceBook() {
+    var PB = window.PriceBook;
+    var pricingSel = $("#pbPricing");
+    if (pricingSel) pricingSel.addEventListener("change", function () {
+      var flat = pricingSel.value === "flat";
+      $("#pbFlatWrap").style.display = flat ? "" : "none";
+      $("#pbPerTonWrap").style.display = flat ? "none" : "";
+    });
+    var addBtn = $("#pbAddBtn");
+    if (addBtn) addBtn.addEventListener("click", function () {
+      var name = ($("#pbName").value || "").trim();
+      if (!name) { toast("Give the equipment a name first"); $("#pbName").focus(); return; }
+      function n(id) { var v = parseFloat($("#" + id).value); return isFinite(v) ? v : null; }
+      var fuel = $("#pbFuel").value;
+      var eff2 = n("pbEff2");
+      // One field for the heating rating, read as AFUE for a furnace and as
+      // HSPF2 for a heat pump — a rep should not have to know which box to use.
+      var entry = {
+        name: name, tier: $("#pbTier").value, stage: $("#pbStage").value, fuel: fuel,
+        pricing: $("#pbPricing").value,
+        flatPrice: n("pbFlat"), basePrice: n("pbBase"), perTon: n("pbPerTon"),
+        seer2: n("pbSeer"), rebate: n("pbRebate"),
+        afue: fuel !== "hp" ? eff2 : null,
+        hspf2: fuel !== "furnace" ? (fuel === "hp" ? eff2 : null) : null
+      };
+      var clean = PB.normalizeEntry(entry);
+      if (!clean) { toast("That entry couldn't be saved — check the name and price"); return; }
+      var book = PB.load();
+      book.entries.push(clean);
+      PB.save(book);
+      toast(clean.name + " added to your price book");
+      openSettings();   // re-render the sheet so the new row shows
+    });
+    var seed = $("#pbSeedBtn");
+    if (seed) seed.addEventListener("click", function () {
+      PB.save({ entries: PB.starterEntries() });
+      toast("Template added — edit the prices to match your shop");
+      openSettings();
+    });
+    var list = $("#pbList");
+    if (list) list.addEventListener("click", function (ev) {
+      var btn = ev.target.closest("[data-pbdel]");
+      if (!btn) return;
+      var i = parseInt(btn.getAttribute("data-pbdel"), 10);
+      var book = PB.load();
+      var removed = book.entries.splice(i, 1)[0];
+      PB.save(book);
+      toast(removed ? removed.name + " removed" : "Removed");
+      openSettings();
+    });
+  }
+
+  // ---------- RoomIQ (Pro/Fleet + trial): room-by-room comfort diagnosis ----------
+  //
+  // The whole-house load says how many tons. RoomIQ says which room is the
+  // problem and whether the fix is air or equipment — which is the question
+  // the homeowner actually asked when they called. Rooms live in
+  // state.overrides.rooms so they ride along in saved jobs like every other
+  // input, and a fresh address starts fresh.
+
+  var ROOM_ORIENT_OPTS = [["unknown", "Not sure"], ["n", "North"], ["ne", "Northeast"], ["e", "East"], ["se", "Southeast"], ["s", "South"], ["sw", "Southwest"], ["w", "West"], ["nw", "Northwest"]];
+
+  function roomsState() {
+    if (!Array.isArray(state.overrides.rooms)) state.overrides.rooms = [];
+    return state.overrides.rooms;
+  }
+
+  function computeRooms() {
+    var r = state.result, c = state.climate, e = state.effective;
+    if (!r || !c || !window.RoomLoads) { state.roomResult = null; return; }
+    var rooms = roomsState();
+    if (!rooms.length) { state.roomResult = null; return; }
+    state.roomResult = window.RoomLoads.distribute({
+      rooms: rooms,
+      house: r,
+      area: e.area,
+      ceiling: e.ceiling,
+      windowFrac: r.inputs.windowFrac,
+      cooling1: c.cooling1,
+      heating99: c.heating99,
+      indoorCool: 75,
+      indoorHeat: 70,
+      quality: window.LoadCalc.QUALITY[e.quality] || window.LoadCalc.QUALITY.average
+    });
+  }
+
+  function roomIcon() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 11h18M11 3v18"/></svg>'; }
+
+  function roomCard() {
+    if (planTier() < 2) {
+      var cta = planTier() === 0
+        ? '<a class="permit-cta" href="auth.html#signup">Start free trial — unlock RoomIQ</a>'
+        : '<a class="permit-cta" href="index.html#pricing">Upgrade to Pro — unlock RoomIQ</a>';
+      return '' +
+        '<div class="permit-card locked">' +
+          '<div class="hp-head"><span class="ico gold">' + lockIcon() + '</span>RoomIQ™ — room-by-room diagnosis<span class="permit-badge">PRO</span></div>' +
+          '<p class="hp-text">Answer the question the customer actually called about. Enter the rooms and their registers, and RoomIQ shows which room is starved of air, how much it is short by, and whether the fix is ductwork or equipment — from this home\'s own load.</p>' +
+          '<div class="permit-teaser"><div class="tz-row"></div><div class="tz-row w70"></div><div class="tz-row w85"></div><div class="tz-row w60"></div></div>' +
+          cta +
+        '</div>';
+    }
+    var rooms = roomsState(), rr = state.roomResult;
+    var types = window.RoomLoads.ROOM_TYPES;
+    var typeOpts = Object.keys(types).map(function (k) { return [k, types[k].label]; });
+
+    var rowsHtml = rooms.map(function (rm, i) {
+      return '<div class="rq-row" data-i="' + i + '">' +
+        '<div class="rq-row-head">' +
+          '<input type="text" class="rq-name" id="rqName' + i + '" value="' + escapeAttr(rm.name || "") + '" placeholder="Room name" />' +
+          '<button class="rq-del" id="rqDel' + i + '" title="Remove room" aria-label="Remove room">×</button>' +
+        '</div>' +
+        '<div class="rq-grid">' +
+          '<div><label>Area ft²</label><input type="number" id="rqArea' + i + '" min="10" max="4000" step="10" value="' + (rm.area != null ? rm.area : "") + '" /></div>' +
+          '<div><label>Type</label>' + selectHtml("rqType" + i, rm.type || "bedroom", typeOpts) + '</div>' +
+          '<div><label>Outside walls</label>' + selectHtml("rqWalls" + i, rm.exteriorWalls != null ? rm.exteriorWalls : 1, [[0, "0 (interior)"], [1, "1"], [2, "2 (corner)"], [3, "3"], [4, "4"]]) + '</div>' +
+          '<div><label>Faces</label>' + selectHtml("rqOrient" + i, rm.orientation || "unknown", ROOM_ORIENT_OPTS) + '</div>' +
+          '<div><label>Supplies</label><input type="number" id="rqSup' + i + '" min="0" max="12" step="1" value="' + (rm.supplies != null ? rm.supplies : "") + '" placeholder="#" /></div>' +
+          '<div><label>Measured CFM</label><input type="number" id="rqCfm' + i + '" min="0" max="2000" step="5" value="' + (rm.supplyCfm != null ? rm.supplyCfm : "") + '" placeholder="optional" /></div>' +
+        '</div>' +
+        '<div class="rq-checks">' +
+          '<label class="rq-check"><input type="checkbox" id="rqTop' + i + '"' + (rm.topFloor ? " checked" : "") + ' /> Attic above</label>' +
+          '<label class="rq-check"><input type="checkbox" id="rqUnder' + i + '"' + (rm.overUnconditioned ? " checked" : "") + ' /> Over garage / crawl</label>' +
+        '</div>' +
+      '</div>';
+    }).join("");
+
+    var resultsHtml = "";
+    if (rr) {
+      var maxCool = Math.max.apply(null, rr.rooms.map(function (x) { return x.cooling; }).concat([1]));
+      var resRows = rr.rooms.map(function (x) {
+        var cls = x.worst === "severe" ? " severe" : x.worst === "warn" ? " warn" : "";
+        var air = x.actualCfm != null
+          ? '<b class="' + (x.actualCfm < x.requiredCfm * 0.8 ? "bad" : x.actualCfm > x.requiredCfm * 1.6 ? "over" : "good") + '">' + fmt(x.actualCfm) + ' of ' + fmt(x.requiredCfm) + ' CFM</b>'
+          : '<b>' + fmt(x.requiredCfm) + ' CFM needed</b>';
+        return '<div class="rq-res' + cls + '">' +
+          '<div class="rq-res-top"><span class="rq-res-name">' + escapeHtml(x.name) + '</span>' + air + '</div>' +
+          '<div class="rq-bar"><div class="rq-bar-fill" data-w="' + Math.round(x.cooling / maxCool * 100) + '"></div></div>' +
+          '<div class="rq-res-meta">' + fmt(x.cooling) + ' BTU/h · ' + x.btuPerSqFt + ' BTU/h per ft² · ' + x.area + ' ft² · ' + escapeHtml(x.orientationLabel) +
+            (x.actualCfm != null && x.suppliesSuggested > (x.supplies || 0) ? ' · needs ' + x.suppliesSuggested + ' supplies' : "") + '</div>' +
+          (x.flags.length ? '<div class="rq-flags">' + x.flags.map(function (f) {
+            return '<div class="rq-flag ' + f.level + '">' + escapeHtml(f.text) + '</div>';
+          }).join("") + '</div>' : "") +
+        '</div>';
+      }).join("");
+      resultsHtml =
+        '<div class="rq-results">' +
+          '<div class="rq-summary">' + rr.totals.rooms + ' rooms · ' + fmt(rr.totals.area) + ' of ' + fmt(rr.totals.houseArea) + ' ft² (' + rr.totals.coveragePct + '% of the house) · ' + fmt(rr.totals.requiredCfm) + ' CFM apportioned</div>' +
+          resRows +
+          (rr.diagnosis.length ? '<div class="sq-talk rq-talk"><b>What to tell the customer</b>' + rr.diagnosis.map(function (l) { return '<p>' + escapeHtml(l) + '</p>'; }).join("") + '</div>' : "") +
+          '<p class="sq-foot">' + escapeHtml(rr.disclosure) + '</p>' +
+        '</div>';
+    }
+
+    return '' +
+      '<div class="permit-card rq-card" id="roomCard">' +
+        '<div class="hp-head"><span class="ico gold">' + roomIcon() + '</span>RoomIQ™ — room-by-room diagnosis<span class="permit-badge on">PRO</span></div>' +
+        '<p class="hp-text">Enter the rooms and how many supply registers each one has. RoomIQ splits this home\'s load by each room\'s own glass, orientation and exposure, then shows which rooms are short of air. Rooms do not change the tonnage above; they explain it.</p>' +
+        '<div class="adjust rq-form">' + rowsHtml +
+          '<div class="rq-actions">' +
+            '<button class="rq-add" id="rqAddBtn">+ Add room</button>' +
+            (rooms.length ? '<button class="recalc rq-run" id="rqRunBtn">Diagnose rooms</button>' : "") +
+          '</div>' +
+          (rooms.length ? "" : '<p class="sq-foot">Start with the room the customer complains about, then add the rest. Four or five rooms is usually enough to find the problem.</p>') +
+        '</div>' +
+        resultsHtml +
+      '</div>';
+  }
+
+  function selectHtml(id, val, opts) {
+    return '<select id="' + id + '">' + opts.map(function (o) {
+      return '<option value="' + escapeAttr(String(o[0])) + '"' + (String(o[0]) === String(val) ? " selected" : "") + '>' + escapeHtml(o[1]) + '</option>';
+    }).join("") + '</select>';
+  }
+
+  function wireRooms() {
+    var add = $("#rqAddBtn");
+    if (!add) return;
+    function readRooms() {
+      var rooms = roomsState();
+      rooms.forEach(function (rm, i) {
+        function v(id) { var el = $("#" + id + i); return el ? el.value : null; }
+        function n(id) { var x = parseFloat(v(id)); return isFinite(x) ? x : null; }
+        function chk(id) { var el = $("#" + id + i); return !!(el && el.checked); }
+        var name = v("rqName");
+        if (name != null) rm.name = String(name).slice(0, 40);
+        rm.area = n("rqArea");
+        rm.type = v("rqType") || rm.type;
+        var walls = n("rqWalls"); rm.exteriorWalls = walls != null ? walls : rm.exteriorWalls;
+        rm.orientation = v("rqOrient") || rm.orientation;
+        rm.supplies = n("rqSup");
+        rm.supplyCfm = n("rqCfm");
+        rm.topFloor = chk("rqTop");
+        rm.overUnconditioned = chk("rqUnder");
+      });
+    }
+    add.addEventListener("click", function () {
+      readRooms();   // never lose what's typed when another row is added
+      var rooms = roomsState();
+      // Second storey rooms are the ones with attic above, so default that on
+      // once the house is known to have more than one floor and the obvious
+      // ground-floor rooms are already entered.
+      rooms.push({ name: "", area: null, type: rooms.length === 0 ? "living" : "bedroom", exteriorWalls: 1, orientation: "unknown", supplies: null, supplyCfm: null, topFloor: false, overUnconditioned: false });
+      computeRooms();
+      render();
+      var el = $("#rqName" + (rooms.length - 1));
+      if (el) { el.focus(); el.scrollIntoView({ behavior: "smooth", block: "center" }); }
+    });
+    var run = $("#rqRunBtn");
+    if (run) run.addEventListener("click", function () {
+      readRooms();
+      computeRooms();
+      render();
+      var res = $(".rq-results");
+      if (res) res.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    roomsState().forEach(function (rm, i) {
+      var del = $("#rqDel" + i);
+      if (del) del.addEventListener("click", function () {
+        readRooms();
+        roomsState().splice(i, 1);
+        computeRooms();
+        render();
+      });
+    });
+  }
+
+  // Printed room-by-room appendix — only once a diagnosis exists.
+  function reportRooms() {
+    var rr = state.roomResult;
+    if (!rr || planTier() < 2) return "";
+    var head = '<tr><th>Room</th><th>Area</th><th>Cooling</th><th>Heating</th><th>Air needed</th><th>Air now</th></tr>';
+    var rows = rr.rooms.map(function (x) {
+      return '<tr><td>' + escapeHtml(x.name) + '</td><td>' + fmt(x.area) + ' ft²</td><td>' + fmt(x.cooling) + '</td><td>' + fmt(x.heating) + '</td><td>' + fmt(x.requiredCfm) + ' CFM</td><td>' +
+        (x.actualCfm != null ? fmt(x.actualCfm) + " CFM" : "—") + '</td></tr>';
+    }).join("");
+    var problems = rr.rooms.filter(function (x) { return x.worst === "severe" || x.worst === "warn"; });
+    return '<div class="rp-block rp-rooms"><h2>Room-by-room diagnosis</h2>' +
+      '<table class="rp-room-table">' + head + rows + '</table>' +
+      (problems.length ? '<p class="rp-permit-note"><b>Rooms needing attention:</b> ' + problems.map(function (x) {
+        return escapeHtml(x.name) + " (" + escapeHtml(x.flags[0].text) + ")";
+      }).join(" ") + '</p>' : "") +
+      '<p class="rp-disc" style="margin-top:6px">' + escapeHtml(rr.disclosure) + '</p>' +
+    '</div>';
   }
 
   // ---------- SalesIQ (Pro/Fleet + trial): replacement proposal builder ----------
@@ -1278,10 +1588,33 @@
       };
     }
 
+    // --- the shop's price book fills anything the rep hasn't typed ---
+    // Precedence is the same everywhere in this app: a number the rep entered
+    // on this job wins, the shop's saved book fills the blanks, and the
+    // generic defaults are the last resort. Filling only blanks means opening
+    // a saved job never overwrites the prices that job was quoted at.
+    var book = window.PriceBook ? window.PriceBook.load() : { entries: [] };
+    var filled = window.PriceBook ? window.PriceBook.fillProposal(book, {
+      fuel: s.fuel,
+      stageByTier: { good: "single", better: "two", best: "variable" },
+      tonsByTier: { good: r.sizing.single, better: r.sizing.two, best: r.sizing.variable }
+    }) : null;
+    var bookUsed = [];
+
     // --- the three replacement options ---
     var options = SALES_OPTION_DEFAULTS.map(function (d, i) {
       var o = s.options[i] || {};
       var tons = r.sizing[d.systemType];
+      var pb = filled ? filled[d.key] : null;
+      if (pb) {
+        if (o.price == null && pb.price != null) { o.price = pb.price; o.fromBook = true; }
+        if (o.rebate == null && pb.rebate > 0) o.rebate = pb.rebate;
+        if (o.seer2 == null && pb.seer2 != null) o.seer2 = pb.seer2;
+        if (o.afue == null && pb.afue != null) o.afue = pb.afue;
+        if (o.hspf2 == null && pb.hspf2 != null) o.hspf2 = pb.hspf2;
+        if (o.fromBook) bookUsed.push({ tier: d.key, name: pb.entry.name, basis: pb.basis, exact: pb.exact, nearestTons: pb.nearestTons, tierMatch: pb.tierMatch });
+      }
+      s.options[i] = o;
       var sys = {
         coolType: s.fuel === "furnace" ? "ac" : "hp",
         seer2: o.seer2 > 0 ? o.seer2 : d.seer2, tons: tons, systemType: d.systemType,
@@ -1312,7 +1645,8 @@
       o.paybackYears = (dPrice > 0 && dSave > 0) ? Math.round(dPrice / dSave * 10) / 10 : (dPrice <= 0 ? 0 : null);
     });
 
-    state.salesResult = { existing: existing, options: options, fuel: s.fuel, binsLive: binsLive, rates: s.rates, apr: s.apr, months: s.months, down: s.down || 0 };
+    state.salesResult = { existing: existing, options: options, fuel: s.fuel, binsLive: binsLive, rates: s.rates, apr: s.apr, months: s.months, down: s.down || 0,
+      bookUsed: bookUsed, bookSize: book.entries.length };
   }
 
   // Negative money reads as "−$23", never "$-23" — this shows up whenever
@@ -1447,6 +1781,7 @@
         '</div>' +
 
         '<div class="sq-results" id="salesResults">' +
+          priceBookNote(sr) +
           exHtml +
           '<div class="sq-res-grid">' + resultCols + '</div>' +
           (talkTrack ? '<div class="sq-talk"><b>Talk track</b>' + talkTrack + '</div>' : "") +
@@ -1455,6 +1790,26 @@
             'Operating costs are an engineering estimate for comparing options on this house at the rates above — not a bill guarantee. Efficiency assumptions: ' + (s.fuel === "furnace" ? "A/C SEER2 with a furnace at the AFUE shown" : s.fuel === "hp" ? "heat pump SEER2/HSPF2 with electric backup below its balance point" : "heat pump above the switchover temperature, gas furnace below it") + '.</p>' +
         '</div>' +
       '</div>';
+  }
+
+  // Where the prices on this proposal came from. A rep about to say a number
+  // out loud should know whether it is their book's, and whether the book had
+  // to substitute a neighbouring size or tier to produce it.
+  function priceBookNote(sr) {
+    if (!sr.bookUsed || !sr.bookUsed.length) {
+      if (!sr.bookSize) {
+        return '<p class="pb-note">Prices below are blank until you enter them. Save your equipment once under Settings, in the price book, and every future proposal fills itself in at the size the house actually needs.</p>';
+      }
+      return '';
+    }
+    var parts = sr.bookUsed.map(function (u) {
+      var caveats = [];
+      if (!u.exact && u.nearestTons) caveats.push("priced at your nearest stocked size, " + u.nearestTons + " ton");
+      if (!u.tierMatch) caveats.push("nothing in that tier, so this is your closest line");
+      return "<b>" + escapeHtml(u.name) + "</b>" + (caveats.length ? " (" + escapeHtml(caveats.join("; ")) + ")" : "");
+    });
+    var anyCaveat = sr.bookUsed.some(function (u) { return !u.exact || !u.tierMatch; });
+    return '<p class="pb-note' + (anyCaveat ? ' warn' : '') + '">Filled from your price book: ' + parts.join(", ") + '. Edit any figure below to override it for this job.</p>';
   }
 
   // Plain-English sentences the salesperson can read out, generated only
@@ -1750,6 +2105,7 @@
           rrow("Sensible / latent split", fmt(r.cooling.sensible) + " / " + fmt(r.cooling.latent) + " BTU/h") +
         '</table></div>' +
         reportReturnAir() +
+        reportRooms() +
         reportProposal() +
         reportPhotos() +
         reportPhotoInsights() +
@@ -2075,6 +2431,8 @@
         '<div class="status">' + (hasAiKey ? "✓ A key is saved on this device — it never leaves it except to call the provider's API directly." : "No key set — photo analysis stays off; everything else works normally.") + '</div>' +
         '</div>' +
 
+        priceBookGroupHtml() +
+
         '<button class="save" id="saveSettings">Save settings</button>' +
         '<button class="close" id="closeSettings">Close</button>' +
       '</div></div>';
@@ -2082,6 +2440,7 @@
     var overlay = $("#overlay");
     overlay.addEventListener("click", function (e) { if (e.target === overlay) close(); });
     $("#closeSettings").addEventListener("click", close);
+    wirePriceBook();
 
     $("#logoFile").addEventListener("change", function (ev) {
       var f = ev.target.files && ev.target.files[0];
