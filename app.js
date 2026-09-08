@@ -442,7 +442,7 @@
       aiBlock = state.photoBusy
         ? '<button class="action-btn primary ai-btn" disabled><span class="spin"></span>Reading photos…</button>'
         : '<button class="action-btn primary ai-btn" id="aiAnalyzeBtn">' + sparkIcon() + (state.photoAI ? 'Re-analyze photos with AI' : 'Analyze photos with AI') + '</button>' +
-          '<p class="ai-note">Optional. AI reads sun exposure, windows, insulation and size from your shots and tunes the load numbers. Uses your AI provider key (Settings).</p>';
+          '<p class="ai-note">Optional. AI reads sun exposure, windows, insulation and size from your shots and tunes the load numbers — and if you snap the old unit\'s data plate, it pre-fills the current-system fields in SalesIQ. Uses your AI provider key (Settings).</p>';
     }
     return '' +
       '<div class="photos-card">' +
@@ -496,6 +496,10 @@
     quality: "Construction / insulation",
     foundation: "Foundation",
     ceiling: "Ceiling height",
+    existingTons: "Existing unit size",
+    existingYear: "Existing unit year",
+    existingSeer: "Existing unit SEER",
+    existingHeat: "Existing heating type",
     windowFrac: "Window amount",
     area: "Conditioned area",
     stories: "Stories",
@@ -511,6 +515,10 @@
       case "windowFrac": return Math.round(f.value * 100) + "% of floor area";
       case "area": return fmt(f.value) + " ft²";
       case "stories": return f.value + (f.value === 1 ? " story" : " stories");
+      case "existingTons": return f.value + " ton";
+      case "existingYear": return String(f.value);
+      case "existingSeer": return f.value + " SEER";
+      case "existingHeat": return EXISTING_HEAT_LABEL[f.value] || String(f.value);
       default: return String(f.value);
     }
   }
@@ -568,10 +576,27 @@
       var w = winners[f.field];
       if (!w || w.confidence !== "high" || f.confidence === "high") winners[f.field] = f;
     });
+    // Data-plate reads (existingTons/Year/Seer/Heat) don't touch the load —
+    // they pre-fill SalesIQ's "customer's current system", where a value the
+    // rep already typed wins the same way a manual override wins below.
+    var EXISTING_FIELD_KEY = { existingTons: "tons", existingYear: "year", existingSeer: "seer", existingHeat: "heatType" };
+    var ex = salesState().existing;
+    var exTouched = ex.tons != null || ex.year != null || ex.seer != null;
     res.findings.forEach(function (f) {
       f.status = "info";
       if (f.field === "other") return; // informational only
       if (f.confidence === "low" || f.value == null) { f.status = "low"; return; }
+      if (EXISTING_FIELD_KEY[f.field]) {
+        var key = EXISTING_FIELD_KEY[f.field];
+        // heatType always has a default, so treat it as "entered" only once the rep has described the unit at all
+        var already = key === "heatType" ? exTouched : ex[key] != null;
+        if (already) { f.status = "kept"; return; }
+        if (winners[f.field] !== f) { f.status = "duplicate"; return; }
+        ex[key] = f.value;
+        applied[f.field] = f.value;
+        f.status = "applied";
+        return;
+      }
       var overridden = (f.field === "area" || f.field === "ceiling") ? o[f.field] != null : !!o[f.field];
       if (overridden) { f.status = "kept"; return; }               // user's manual setting wins
       if (f.field === "area" && p.source === "fetched") { f.status = "kept"; f.keptWhy = "property records"; return; }

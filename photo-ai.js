@@ -4,7 +4,9 @@
  * Sends the job-site photos to the user's chosen AI provider's vision API and
  * returns structured observations about the home (sun exposure, insulation
  * quality, windows, foundation, ceiling height, size) that the calculator can
- * fold into the load numbers. Entirely optional: no photos or no API key
+ * fold into the load numbers — plus, when a photo shows the existing
+ * equipment's data plate, its tonnage / year / SEER / heating type, which
+ * pre-fill the "customer's current system" in SalesIQ. Entirely optional: no photos or no API key
  * means the calculator behaves exactly as before.
  *
  * Transport (which provider, which HTTP shape) lives in ai-providers.js — this
@@ -36,7 +38,7 @@
           properties: {
             field: {
               type: "string",
-              enum: ["sun", "quality", "foundation", "ceiling", "windowFrac", "area", "stories", "other"]
+              enum: ["sun", "quality", "foundation", "ceiling", "windowFrac", "area", "stories", "existingTons", "existingYear", "existingSeer", "existingHeat", "other"]
             },
             value: { type: ["string", "number", "null"] },
             confidence: { type: "string", enum: ["high", "medium", "low"] },
@@ -67,6 +69,12 @@
       "- field \"windowFrac\" (value: number): glazing as a fraction of floor area — 0.10 = few/small windows, 0.15 = typical, 0.20-0.25 = lots of large windows or glass walls.",
       "- field \"area\" (value: number, ft²): estimated conditioned floor area, only when the current area is an estimate and the photos suggest a clearly different size class.",
       "- field \"stories\" (value: number): visible stories (informational).",
+      "",
+      "If any photo shows the EXISTING HVAC equipment or its data plate (outdoor condenser/heat pump, furnace, air handler, nameplate sticker), also report:",
+      "- field \"existingTons\" (value: number, tons): nominal cooling capacity. Read it from the model number's capacity code — the digits 018/024/030/036/042/048/060 mean 1.5/2/2.5/3/3.5/4/5 tons (BTU/h ÷ 12,000) — or from a stated BTU/h or ton rating. Quote the model number in the note.",
+      "- field \"existingYear\" (value: number, 4-digit year): year of manufacture from the data plate — a printed MFG date, or decoded from the serial number only if the manufacturer's format is unambiguous (e.g. many Carrier/Bryant serials start with week+year digits, Trane/American Standard serials start with year+week, Goodman/Amana serials start with year+month). If you cannot decode it with confidence, use confidence \"low\" and say why in the note.",
+      "- field \"existingSeer\" (value: number): the SEER or SEER2 rating ONLY if it is printed on the unit or an EnergyGuide label. Never estimate it from the brand or age.",
+      "- field \"existingHeat\" (value: \"furnace\" | \"hp\" | \"resistance\" | \"none\"): the home's heating type if visible — a gas furnace (flue, gas line, burner compartment), a heat pump (outdoor unit with a reversing valve / labeled heat pump, or a heat-pump model prefix), electric strip/baseboard heat, or none.",
       "- field \"other\" (value: null): any other load-relevant observation — big west-facing glass, window AC units, radiant barrier, new attic insulation, leaky ductwork, etc. Put the observation in the note.",
       "",
       "Rules: be conservative. Use confidence \"low\" whenever unsure — low-confidence findings are shown to the user but NOT applied to the calculation. Never invent characteristics that are not visible in the photos. Skip any field the photos give no evidence for."
@@ -81,7 +89,11 @@
     ceiling: function (v) { v = Number(v); return v >= 7 && v <= 20 ? Math.round(v * 2) / 2 : null; },
     windowFrac: function (v) { v = Number(v); return v >= 0.06 && v <= 0.35 ? Math.round(v * 100) / 100 : null; },
     area: function (v) { v = Number(v); return v >= 300 && v <= 15000 ? Math.round(v / 50) * 50 : null; },
-    stories: function (v) { v = Number(v); return v >= 1 && v <= 4 ? Math.round(v) : null; }
+    stories: function (v) { v = Number(v); return v >= 1 && v <= 4 ? Math.round(v) : null; },
+    existingTons: function (v) { v = Number(v); return v >= 1 && v <= 6 ? Math.round(v * 2) / 2 : null; },
+    existingYear: function (v) { v = Number(v); return v >= 1970 && v <= 2030 ? Math.round(v) : null; },
+    existingSeer: function (v) { v = Number(v); return v >= 6 && v <= 30 ? Math.round(v * 10) / 10 : null; },
+    existingHeat: function (v) { return v === "furnace" || v === "hp" || v === "resistance" || v === "none" ? v : null; }
   };
 
   function sanitize(raw) {
@@ -129,5 +141,6 @@
     }).then(sanitize);
   }
 
-  root.PhotoAI = { analyze: analyze };
+  // Underscore members are exposed for the hermetic test suite only.
+  root.PhotoAI = { analyze: analyze, _sanitize: sanitize, _SCHEMA: SCHEMA, _buildPrompt: buildPrompt };
 })(typeof window !== "undefined" ? window : globalThis);
