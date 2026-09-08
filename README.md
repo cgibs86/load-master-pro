@@ -65,6 +65,13 @@ npm start
 > Prefer Python? `python3 -m http.server 8099` from the repo root works too —
 > but the Pro permit search (below) needs the Node server.
 
+### Tests
+
+```bash
+npm test                # 206 hermetic unit checks: load engine, climate engine, energy engine, AI providers, permit search, PhotoScan
+npm run audit:browser   # live-browser regression: full app flow, EnvelopeIQ, SalesIQ, nameplate -> SalesIQ (needs network + Playwright's Chromium)
+```
+
 ## Pro: permit & code search
 
 After a calculation, a **Pro** panel can deep-search the searched home's city/county

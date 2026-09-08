@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node serve.cjs",
     "dev": "node serve.cjs",
+    "audit:browser": "node tests/browser/run.cjs",
     "test": "node tests/manual-j-benchmarks.js && node tests/climate-engine.test.js && node tests/ai-providers.test.js && node tests/permit-search.test.js && node tests/energy-engine.test.js && node tests/photo-ai.test.js"
   },
   "engines": {
