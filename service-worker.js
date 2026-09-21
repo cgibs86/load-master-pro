@@ -1,5 +1,5 @@
 /* LoadMaster Pro AI — offline service worker */
-var CACHE = "loadmasterproai-v23";
+var CACHE = "loadmasterproai-v24";
 var ASSETS = [
   "./",
   "./index.html",

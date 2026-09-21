@@ -149,11 +149,15 @@ async function openPanel(page) {
   // ---------- 4. Return-air check ----------
   console.log("\n=== Return-air check ===");
   await page.selectOption("#inRetAirMode", "grille");
-  await page.waitForTimeout(150);
+  // Changing the mode rebuilds #retAirFields, so wait for the grille inputs to
+  // actually exist rather than guessing at a delay — a fixed wait raced the
+  // re-render and made this step fail intermittently.
+  await page.waitForSelector("#inRetAirGrilleW", { state: "visible" });
   await page.fill("#inRetAirGrilleW", "20");
   await page.fill("#inRetAirGrilleH", "20");
   await page.click("#checkRetAirBtn");
-  await page.waitForTimeout(400);
+  await page.waitForSelector(".retair-card", { state: "visible" });
+  await page.waitForTimeout(200);
   const ra = await page.evaluate(() => document.querySelector(".retair-card")?.textContent || "");
   ok("return-air check renders a verdict", /Adequate|undersized/.test(ra), ra.slice(0, 70));
 
