@@ -59,6 +59,14 @@ per-ton, or an explicit price per stocked size), and SalesIQ fills every
 proposal from it automatically. A figure the rep types on a job always wins,
 so opening a saved job never rewrites what it was quoted at.
 
+**Plans.** The Free plan is one complete load calculation, then an upgrade
+prompt; guests are held to the same ceiling so signing up is never worse than
+not signing up, and an expired trial falls back to Free rather than to a paid
+tier. The counter is per-device `localStorage`, which makes it a product
+boundary rather than a security control — server-enforced entitlements come
+with the Supabase work in SETUP.md. Paid plans are Solo $199/mo, Pro $499/mo,
+and Fleet by quote.
+
 > **Estimating tool only.** Results are a Manual J–style approximation for quick
 > sizing guidance — not a stamped engineering report. Confirm final equipment
 > sizing with a licensed HVAC professional.
@@ -88,7 +96,7 @@ npm start
 
 ```bash
 npm test                # 329 hermetic unit checks: load engine, climate engine, energy engine, AI providers, permit search, PhotoScan
-npm run audit:browser   # live-browser regression: full app flow, EnvelopeIQ, SalesIQ, nameplate, layout/print, RoomIQ, price book (needs network + Playwright's Chromium)
+npm run audit:browser   # live-browser regression: app flow, EnvelopeIQ, SalesIQ, nameplate, layout/print, RoomIQ, price book, thinking overlay + free tier (needs network + Playwright's Chromium)
 ```
 
 ## Pro: permit & code search

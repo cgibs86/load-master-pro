@@ -195,8 +195,8 @@ section { padding: 68px 0 0; }
 }
 .feat p { color: var(--muted); font-size: 15px; line-height: 1.7; margin: 0 0 16px; }
 .feat ul { list-style: none; padding: 0; margin: 0; }
-.feat li { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; color: var(--muted); padding: 7px 0; }
-.feat li::before { content: "✓"; color: var(--cyan); font-weight: 800; flex: none; }
+.feat li { position: relative; font-size: 14px; color: var(--muted); padding: 7px 0 7px 22px; line-height: 1.5; }
+.feat li::before { content: "✓"; position: absolute; left: 0; top: 7px; color: var(--cyan); font-weight: 800; }
 .feat li b { color: var(--text); }
 .feat-vis {
   border-radius: var(--radius); border: 1px solid var(--border); background: var(--card-strong);
@@ -280,7 +280,13 @@ section { padding: 68px 0 0; }
 
 /* ---------- Pricing ---------- */
 .plans { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; align-items: stretch; }
-@media (max-width: 880px) { .plans { grid-template-columns: 1fr; max-width: 420px; margin: 0 auto; } }
+.plans-4 { grid-template-columns: repeat(4, 1fr); gap: 14px; }
+@media (max-width: 1080px) { .plans-4 { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 880px) { .plans, .plans-4 { grid-template-columns: 1fr; max-width: 420px; margin: 0 auto; } }
+/* "Contact us" takes the same size as the $ figures beside it (inherited from
+   .plan .price) and must stay on one line, or the quote-only card's header
+   grows taller than the priced ones and the four cards stop lining up. */
+.plan .price-quote { white-space: nowrap; letter-spacing: -0.02em; }
 .plan {
   border-radius: 24px; padding: 30px 26px; background: var(--card-strong);
   border: 1px solid var(--border); box-shadow: var(--shadow-sm);
@@ -298,8 +304,9 @@ section { padding: 68px 0 0; }
 .plan .price small { font-size: 14px; font-weight: 600; color: var(--muted); letter-spacing: 0; }
 .plan .per { font-size: 12px; color: var(--muted-2); margin: 6px 0 20px; }
 .plan ul { list-style: none; margin: 0 0 26px; padding: 18px 0 0; border-top: 1px solid var(--border-soft); flex: 1; }
-.plan li { display: flex; gap: 10px; font-size: 13.5px; color: var(--muted); padding: 6.5px 0; align-items: flex-start; }
-.plan li::before { content: "✓"; color: var(--cyan); font-weight: 800; flex: none; }
+.plan li { position: relative; font-size: 13.5px; color: var(--muted); padding: 6.5px 0 6.5px 22px; line-height: 1.5; }
+.plan li::before { content: "✓"; position: absolute; left: 0; top: 6.5px; color: var(--cyan); font-weight: 800; }
+.plan li b { color: var(--text); }
 .plan li.no { opacity: 0.45; }
 .plan li.no::before { content: "—"; color: var(--muted-2); }
 .plan .btn { width: 100%; }
@@ -406,4 +413,52 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 
   .reveal { opacity: 0; transform: translateY(22px); transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1); }
   .reveal.in { opacity: 1; transform: translateY(0); }
+}
+
+/* ---------- Thinking overlay (shared: calculator, landing, auth) ---------- */
+.thinking {
+  position: fixed; inset: 0; z-index: 9000;
+  display: grid; place-items: center;
+  background: rgba(7, 11, 24, 0.72);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  opacity: 0; visibility: hidden; transition: opacity 0.22s ease, visibility 0.22s;
+}
+.thinking.on { opacity: 1; visibility: visible; }
+body.thinking-open { overflow: hidden; }
+.thinking-box { display: flex; flex-direction: column; align-items: center; gap: 18px; padding: 0 28px; text-align: center; }
+
+/* Concentric rings sweeping at different rates, around a pulsing core. */
+.thinking-orbit { position: relative; width: 92px; height: 92px; }
+.thinking-orbit .to-ring {
+  position: absolute; inset: 0; border-radius: 50%;
+  border: 2px solid transparent; border-top-color: #6d7bff; border-right-color: #19c6e8;
+  animation: to-spin 1.15s cubic-bezier(0.45, 0.05, 0.35, 1) infinite;
+}
+.thinking-orbit .to-ring:nth-child(2) { inset: 13px; border-top-color: #19c6e8; border-right-color: transparent; border-left-color: #6d7bff; animation-duration: 1.7s; animation-direction: reverse; }
+.thinking-orbit .to-ring:nth-child(3) { inset: 26px; border-top-color: rgba(143, 182, 255, 0.85); border-right-color: transparent; animation-duration: 2.3s; }
+.thinking-orbit .to-core {
+  position: absolute; inset: 38px; border-radius: 50%;
+  background: linear-gradient(135deg, #6d7bff, #19c6e8);
+  box-shadow: 0 0 22px rgba(25, 198, 232, 0.55);
+  animation: to-pulse 1.5s ease-in-out infinite;
+}
+@keyframes to-spin { to { transform: rotate(360deg); } }
+@keyframes to-pulse { 0%, 100% { transform: scale(0.82); opacity: 0.85; } 50% { transform: scale(1.12); opacity: 1; } }
+
+.thinking-msg {
+  font-size: 15.5px; font-weight: 600; color: #eaf0fb; max-width: 20em; line-height: 1.45;
+  animation: to-fade 0.3s ease;
+}
+@keyframes to-fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.thinking-dots { display: flex; gap: 6px; }
+.thinking-dots i { width: 6px; height: 6px; border-radius: 50%; background: #6ea8ff; opacity: 0.35; animation: to-dot 1.1s ease-in-out infinite; }
+.thinking-dots i:nth-child(2) { animation-delay: 0.16s; }
+.thinking-dots i:nth-child(3) { animation-delay: 0.32s; }
+@keyframes to-dot { 0%, 100% { opacity: 0.3; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-4px); } }
+
+/* Respect a reduced-motion preference: keep the overlay and the message,
+   drop the spinning and bouncing. */
+@media (prefers-reduced-motion: reduce) {
+  .thinking-orbit .to-ring, .thinking-orbit .to-core, .thinking-dots i, .thinking-msg { animation: none; }
+  .thinking-orbit .to-ring { border-top-color: #6d7bff; border-right-color: #19c6e8; }
 }

@@ -126,8 +126,34 @@
       });
   }
 
+  /*
+   * Free-plan ceiling. Shown in place of starting a new calculation, never
+   * over one already on screen — a rep mid-job keeps their result, they just
+   * can't start another. Reopening a saved job stays allowed for the same
+   * reason: the work is already done and paid for in allowance terms.
+   */
+  function blockIfFreeLimitReached() {
+    if (!freeLimitReached()) return false;
+    if (window.Thinking) window.Thinking.hide(true);
+    setLoading(false);
+    var signedIn = !!currentUser();
+    var cta = signedIn
+      ? '<a class="action-btn primary" href="index.html#pricing">See plans</a>'
+      : '<a class="action-btn primary" href="auth.html#signup">Create an account</a><a class="action-btn" href="index.html#pricing">See plans</a>';
+    $("#errorBox").innerHTML =
+      '<div class="limit-card">' +
+        '<div class="limit-head"><span class="ico">' + lockIcon() + '</span>You\'ve used your free load calculation</div>' +
+        '<p>The Free plan covers one complete calculation so you can see the real thing on a real house. ' +
+          (signedIn ? 'Pick a plan to keep going — your saved job stays where it is.' : 'Create an account to pick a plan — your saved job stays on this device.') + '</p>' +
+        '<div class="limit-actions">' + cta + '</div>' +
+      '</div>';
+    $("#errorBox").scrollIntoView({ behavior: "smooth", block: "center" });
+    return true;
+  }
+
   // ---------- Orchestration ----------
   function run(address) {
+    if (blockIfFreeLimitReached()) return;
     activeHistoryId = null;
     setLoading(true, "Locating address…");
     clearError();
@@ -146,6 +172,7 @@
   }
 
   function runFromCoords(geo) {
+    if (blockIfFreeLimitReached()) return;
     activeHistoryId = null;
     setLoading(true, "Analyzing 8,760 hrs of climate…");
     clearError();
@@ -206,6 +233,7 @@
       };
     }
     compute();
+    noteFreeCalcUsed();
     setLoading(false);
     render();
   }
@@ -327,12 +355,44 @@
   function planTier() {
     var u = currentUser();
     if (!u) return 0;
-    var plan = trialExpired(u) ? "solo" : u.plan; // expired trial falls back to Solo-level access
-    var known = { solo: 1, trial: 2, pro: 2, fleet: 3 }[plan];
+    // An expired trial lands on the Free plan, not a paid one. Falling back to
+    // a paid tier would hand every lapsed trial unlimited calculations for
+    // good, which is exactly what the Free plan's single calculation exists
+    // to prevent.
+    var plan = trialExpired(u) ? "free" : u.plan;
+    var known = { free: 0, solo: 1, trial: 2, pro: 2, fleet: 3 }[plan];
     // Fail closed (guest-level access) on an unrecognized/missing plan value
     // rather than silently granting Pro-equivalent feature access.
     return known != null ? known : 0;
   }
+
+  /*
+   * Free-plan allowance.
+   *
+   * The Free plan is one complete load calculation, then an upgrade prompt.
+   * Guests who never signed up sit under the same ceiling — otherwise the
+   * Free plan would be strictly worse than not having an account, and nobody
+   * would ever create one.
+   *
+   * The counter is per-device localStorage, like everything else in this
+   * build. That is honest about what it is: a product boundary, not a
+   * security control. Server-enforced entitlements arrive with the Supabase
+   * work sketched in SETUP.md, and this is the shape that will hand over to.
+   */
+  var FREE_CALC_LIMIT = 1;
+  var CALC_COUNT_KEY = "lmp_free_calcs_v1";
+
+  function freeCalcsUsed() {
+    try { return Math.max(0, parseInt(localStorage.getItem(CALC_COUNT_KEY), 10) || 0); } catch (e) { return 0; }
+  }
+  function noteFreeCalcUsed() {
+    if (!onFreePlan()) return;
+    try { localStorage.setItem(CALC_COUNT_KEY, String(freeCalcsUsed() + 1)); } catch (e) {}
+  }
+  // Tier 0 is a guest or a Free/expired-trial account; every paid plan is 1+.
+  function onFreePlan() { return planTier() < 1; }
+  function freeCalcsLeft() { return Math.max(0, FREE_CALC_LIMIT - freeCalcsUsed()); }
+  function freeLimitReached() { return onFreePlan() && freeCalcsLeft() <= 0; }
 
   // ---------- Rendering ----------
   function fmt(n) { return n.toLocaleString("en-US"); }
@@ -402,13 +462,14 @@
     el.innerHTML = html;
     el.classList.remove("hidden");
     $("#introNote").classList.add("hidden");
+    updateFreeNote();
     document.body.classList.add("has-results");
 
     animateCounts();
     wireAdjust();
     var ac = $("#adjustChip");
     if (ac) ac.addEventListener("click", function () { var d = $("#adjustDetails"); if (d) { d.open = true; d.scrollIntoView({ behavior: "smooth", block: "center" }); } });
-    $("#reportBtn").addEventListener("click", function () { generateReport({}); });
+    $("#reportBtn").addEventListener("click", function () { thinkThen("Building your report…", function () { generateReport({}); }); });
     $("#shareBtn").addEventListener("click", shareResult);
     wirePhotos();
     wirePermit();
@@ -549,7 +610,16 @@
       bedrooms: e.bedrooms,
       yearBuilt: p.yearBuilt
     };
-    window.PhotoAI.analyze(state.photos.map(function (ph) { return ph.src; }), ctx, s)
+    var photoWork = window.PhotoAI.analyze(state.photos.map(function (ph) { return ph.src; }), ctx, s);
+    if (window.Thinking) {
+      photoWork = window.Thinking.during([
+        "Uploading " + state.photos.length + " photo" + (state.photos.length === 1 ? "" : "s") + "…",
+        "Reading the building…",
+        "Checking windows, insulation and exposure…",
+        "Refining the load…"
+      ], photoWork, 1600);
+    }
+    photoWork
       .then(applyPhotoInsights)
       .catch(function (err) {
         state.photoBusy = false;
@@ -709,7 +779,7 @@
   }
   function wirePermit() {
     var pkg = $("#permitPkgBtn");
-    if (pkg) pkg.addEventListener("click", function () { generateReport({ permit: true }); });
+    if (pkg) pkg.addEventListener("click", function () { thinkThen("Assembling the permit package…", function () { generateReport({ permit: true }); }); });
     var mail = $("#permitMailBtn");
     if (mail) mail.addEventListener("click", emailPermitDept);
   }
@@ -936,10 +1006,12 @@
       state.overrides.retAirGrilleW = isFinite(retGWVal) && retGWVal > 0 ? retGWVal : undefined;
       var retGHEl = $("#inRetAirGrilleH"); var retGHVal = retGHEl ? parseFloat(retGHEl.value) : NaN;
       state.overrides.retAirGrilleH = isFinite(retGHVal) && retGHVal > 0 ? retGHVal : undefined;
-      compute();   // validation-only field: recomputes returnAir, load numbers are unchanged
-      render();
-      var card = $(".retair-card");
-      if (card) card.scrollIntoView({ behavior: "smooth", block: "center" });
+      thinkThen("Checking return air…", function () {
+        compute();   // validation-only field: recomputes returnAir, load numbers are unchanged
+        render();
+        var card = $(".retair-card");
+        if (card) card.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
     });
   }
   function returnAirIcon() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h13"/><path d="M12 7l5 5-5 5"/><path d="M21 5v14"/></svg>'; }
@@ -1173,9 +1245,27 @@
         var bedsChanged = state.overrides.bedrooms != null && state.overrides.bedrooms !== state.property.bedrooms;
         if (areaChanged || bedsChanged) state.property.source = "estimate";
       }
-      compute();
-      render();
+      thinkThen("Recalculating the load…", function () {
+        compute();
+        render();
+      });
     });
+  }
+
+  /*
+   * A quiet line above the results saying how much of the free allowance is
+   * left. Someone should meet the ceiling before they hit it, not after they
+   * have typed a customer's address.
+   */
+  function updateFreeNote() {
+    var host = $("#freeNote");
+    if (!host) return;
+    if (!onFreePlan()) { host.innerHTML = ""; host.classList.add("hidden"); return; }
+    var left = freeCalcsLeft();
+    host.classList.remove("hidden");
+    host.innerHTML = left > 0
+      ? 'Free plan · <b>' + left + '</b> load calculation' + (left === 1 ? "" : "s") + ' left. <a href="index.html#pricing">See plans</a>'
+      : 'Free plan · no calculations left. <a href="index.html#pricing">See plans</a>';
   }
 
   // ---------- Count-up + bar animations ----------
@@ -1468,10 +1558,12 @@
     var run = $("#rqRunBtn");
     if (run) run.addEventListener("click", function () {
       readRooms();
-      computeRooms();
-      render();
-      var res = $(".rq-results");
-      if (res) res.scrollIntoView({ behavior: "smooth", block: "start" });
+      thinkThen("Splitting the load room by room…", function () {
+        computeRooms();
+        render();
+        var res = $(".rq-results");
+        if (res) res.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
     });
     roomsState().forEach(function (rm, i) {
       var del = $("#rqDel" + i);
@@ -1884,10 +1976,12 @@
     }
     btn.addEventListener("click", function () {
       readInputs();
-      computeSales();
-      render();
-      var card = $("#salesResults");
-      if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+      thinkThen("Pricing the options…", function () {
+        computeSales();
+        render();
+        var card = $("#salesResults");
+        if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
     });
     // Switching fuel changes which efficiency fields make sense — rebuild the
     // option columns straight away rather than waiting for the button.
@@ -2000,8 +2094,10 @@
     state.photos = []; state.photoAI = null; state.photoBusy = false;
     $("#address").value = j.address;
     clearError();
-    compute();
-    render();
+    thinkThen("Reopening this job…", function () {
+      compute();
+      render();
+    });
   }
 
   // ---------- Share ----------
@@ -2257,11 +2353,11 @@
     if (!u) { location.href = "auth.html"; return; }
     var expired = trialExpired(u);
     var daysLeft = trialDaysLeft(u);
-    var planLabel = { trial: "Free trial", solo: "Solo", pro: "Pro", fleet: "Fleet" }[u.plan] || "Free trial";
+    var planLabel = { free: "Free", trial: "Free trial", solo: "Solo", pro: "Pro", fleet: "Fleet" }[u.plan] || "Free";
     var trialNote = "";
     if (u.plan === "trial") {
       trialNote = expired
-        ? '<div class="status warn">Your 14-day free trial has ended — you now have Solo-tier access. <a class="link" href="index.html#pricing">Upgrade to Pro or Fleet</a> to get PermitIQ and PhotoScan AI back.</div>'
+        ? '<div class="status warn">Your 14-day free trial has ended — you\'re on the Free plan now. <a class="link" href="index.html#pricing">Pick a plan</a> to keep calculating.</div>'
         : daysLeft != null
           ? '<div class="status">' + daysLeft + ' day' + (daysLeft === 1 ? "" : "s") + ' left in your free trial.</div>'
           : "";
@@ -2273,6 +2369,7 @@
         '<p class="sub">' + escapeHtml(u.email) + (u.company ? " · " + escapeHtml(u.company) : "") + '</p>' +
         '<div class="status">Plan: <b>' + planLabel + '</b>. Billing &amp; team seats activate when your workspace goes live.</div>' +
         trialNote +
+        (onFreePlan() ? '<div class="status">Free plan: <b>' + freeCalcsLeft() + ' of ' + FREE_CALC_LIMIT + '</b> load calculation' + (FREE_CALC_LIMIT === 1 ? "" : "s") + ' remaining on this device.</div>' : "") +
         '<button class="save" id="acctUpgrade">See plans</button>' +
         '<button class="close" id="acctLogout">Log out</button>' +
       '</div></div>';
@@ -2305,6 +2402,30 @@
     btn.innerHTML = on
       ? '<span class="spin"></span><span class="cta-label">' + (label || "Calculating…") + '</span>'
       : '<span class="cta-label">Calculate load</span>';
+    // The overlay carries the same label the button does, so the two never
+    // disagree about what the app is doing.
+    if (!window.Thinking) return;
+    if (on) {
+      if ($(".thinking.on")) window.Thinking.setMessage(label || "Calculating…");
+      else window.Thinking.show(label || "Calculating…");
+    } else {
+      window.Thinking.hide();
+    }
+  }
+
+  // Short bursts of work (a recalculate, a room diagnosis, a proposal) finish
+  // in well under a second, so they get the overlay only long enough to
+  // acknowledge the tap — run() drives its own longer sequence via setLoading.
+  function thinkThen(label, fn) {
+    if (!window.Thinking) { fn(); return; }
+    window.Thinking.show(label);
+    // Two frames: one to paint the overlay, one before the synchronous work
+    // blocks the main thread — otherwise the overlay never appears at all.
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        try { fn(); } finally { window.Thinking.hide(); }
+      });
+    });
   }
 
   // ---------- Address autocomplete (debounced Nominatim) ----------
@@ -2545,6 +2666,7 @@
 
   // ---------- Wire up ----------
   function init() {
+    updateFreeNote();
     $("#calcBtn").addEventListener("click", function () {
       var a = $("#address").value.trim();
       if (a.length < 4) { showError("Please enter a street address (with city/state)."); return; }

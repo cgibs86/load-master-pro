@@ -388,27 +388,42 @@
     <div class="sec-head">
       <span class="eyebrow">Simple pricing</span>
       <h2>Pays for itself on<br>the first saved go-back</h2>
-      <p>Every plan starts with a 14-day free trial. Cancel anytime.</p>
+      <p>Start with one free calculation. Paid plans include a 14-day trial.</p>
     </div>
-    <div class="plans reveal">
+    <div class="plans plans-4 reveal">
+      <div class="plan">
+        <h3>Free</h3>
+        <div class="for">See it on a real house first</div>
+        <div class="price">$0</div>
+        <div class="per">1 load calculation · no card</div>
+        <ul>
+          <li><b>One complete load calculation</b></li>
+          <li>TrueClimate™ per-address engine</li>
+          <li>EnvelopeIQ™ code-era defaults</li>
+          <li>Heat pump balance point</li>
+          <li class="no">More than one calculation</li>
+          <li class="no">Saved job history</li>
+          <li class="no">PhotoScan AI · PermitIQ™</li>
+          <li class="no">SalesIQ™ · RoomIQ™</li>
+          <li class="no">Branded PDF reports</li>
+        </ul>
+        <a class="btn btn-ghost" href="auth.html?plan=free#signup">Run one free calc</a>
+      </div>
       <div class="plan">
         <h3>Solo</h3>
         <div class="for">Owner-operators &amp; one-truck shops</div>
-        <div class="price">$19<small>/mo</small></div>
+        <div class="price">$199<small>/mo</small></div>
         <div class="per">1 user · billed monthly</div>
         <ul>
-          <li>Unlimited load calculations</li>
+          <li><b>Unlimited load calculations</b></li>
           <li>TrueClimate™ per-address engine</li>
-          <li>EnvelopeIQ™ code-era envelope defaults</li>
+          <li>EnvelopeIQ™ code-era defaults</li>
           <li>Heat pump balance point analyzer</li>
           <li>Equipment plans &amp; confidence ranges</li>
           <li>Saved job history</li>
-          <li class="no">PhotoScan AI photo analysis</li>
-          <li class="no">PermitIQ™ permit requirements</li>
-          <li class="no">SalesIQ™ replacement proposals</li>
-          <li class="no">RoomIQ™ room-by-room diagnosis</li>
+          <li class="no">PhotoScan AI · PermitIQ™</li>
+          <li class="no">SalesIQ™ · RoomIQ™</li>
           <li class="no">Branded PDF reports</li>
-          <li class="no">White-label company branding</li>
         </ul>
         <a class="btn btn-ghost" href="auth.html#signup" data-plan="solo">Start free trial</a>
       </div>
@@ -416,19 +431,18 @@
         <span class="tag">Most popular</span>
         <h3>Pro</h3>
         <div class="for">Serious shops that sell every day</div>
-        <div class="price">$49<small>/mo</small></div>
+        <div class="price">$499<small>/mo</small></div>
         <div class="per">3 users · billed monthly</div>
         <ul>
           <li><b>Everything in Solo</b></li>
-          <li><b>PhotoScan AI</b>: snap photos, watch the AI refine every load calc in front of the customer</li>
-          <li><b>PermitIQ™</b>: city permit requirements, SEER2 minimums, setbacks &amp; code checklist per address</li>
-          <li><b>SalesIQ™</b>: current-system cost &amp; right-size check, Good/Better/Best with operating cost, financing and net monthly</li>
-          <li><b>RoomIQ™</b>: room-by-room comfort diagnosis — which room is starved of air, and by how much</li>
-          <li><b>Price book</b>: save your equipment and pricing once; every proposal fills itself at the right size</li>
-          <li>Permit-ready package: report + site photos, with a pre-written email ready for the permit office</li>
+          <li><b>PhotoScan AI</b> — photos refine the load live</li>
+          <li><b>PermitIQ™</b> — the city's rules per address</li>
+          <li><b>SalesIQ™</b> — Good/Better/Best, net monthly</li>
+          <li><b>RoomIQ™</b> — which room is starved of air</li>
+          <li><b>Price book</b> — proposals fill themselves</li>
+          <li>Permit-ready package with photos</li>
           <li>Branded PDF reports, unlimited</li>
-          <li>White-label: your logo, license &amp; colors</li>
-          <li>Automatic property-data lookups</li>
+          <li>White-label: your logo &amp; license</li>
           <li>Priority support</li>
         </ul>
         <a class="btn btn-primary" href="auth.html#signup" data-plan="pro">Start free trial</a>
@@ -436,20 +450,20 @@
       <div class="plan">
         <h3>Fleet</h3>
         <div class="for">Multi-crew &amp; multi-location companies</div>
-        <div class="price">$129<small>/mo</small></div>
-        <div class="per">10 users · billed monthly</div>
+        <div class="price price-quote">Contact us</div>
+        <div class="per">Custom seats · annual billing</div>
         <ul>
           <li><b>Everything in Pro</b></li>
-          <li>10 seats, add more anytime</li>
-          <li>Volume pricing as your crew grows</li>
+          <li>Seats to fit your crew</li>
+          <li>Volume pricing as you grow</li>
           <li>Team onboarding session</li>
           <li>Early access to new AI tools</li>
           <li>Dedicated account manager</li>
         </ul>
-        <a class="btn btn-ghost" href="auth.html#signup" data-plan="fleet">Start free trial</a>
+        <a class="btn btn-ghost" href="mailto:sales@loadmasterpro.ai?subject=Fleet%20plan%20quote">Contact for a quote</a>
       </div>
     </div>
-    <p class="pricing-note">Prices in USD. One prevented mis-sized condenser — or one avoided dispute — pays for years of Pro.</p>
+    <p class="pricing-note">Prices in USD. One prevented mis-sized condenser — or one avoided dispute — pays for the year.</p>
   </section>
 
   <!-- ================= FINALE ================= -->
@@ -479,7 +493,15 @@
   </footer>
 
   <script src="config.js"></script>
+  <script src="thinking.js"></script>
   <script>
+  // Every CTA on this page leaves for another page. Without an acknowledgement
+  // a tap on a slow connection looks like nothing happened, and people tap again.
+  (function () {
+    if (!window.Thinking) return;
+    window.Thinking.wireLinks('a[href$="app.html"]', "Opening the calculator…");
+    window.Thinking.wireLinks('a[href*="auth.html"]', "Taking you to sign-up…");
+  })();
   (function () {
     var links = (window.LMP_CONFIG && window.LMP_CONFIG.stripeLinks) || {};
     document.querySelectorAll("[data-plan]").forEach(function (a) {
