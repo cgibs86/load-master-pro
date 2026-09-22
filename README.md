@@ -59,6 +59,22 @@ per-ton, or an explicit price per stocked size), and SalesIQ fills every
 proposal from it automatically. A figure the rep types on a job always wins,
 so opening a saved job never rewrites what it was quoted at.
 
+**RebateIQ** (Pro) searches the live web for the grants, tax credits, utility
+rebates and income-qualified programs that apply to one address and the system
+being quoted, and returns each with a source, an apply link, the efficiency it
+requires, and a plain summary the rep reads to the homeowner. It reads the web
+at quote time rather than shipping a table because incentive data is the most
+perishable in the industry: utility rebates change seasonally, state IRA
+programs launched on staggered dates, and budgets run dry mid-year. Money shown
+to a homeowner has to be defensible, so `rebate-iq.js` drops any program
+without a retrievable source URL, refuses non-http links before they reach an
+anchor, and reports two totals — one excluding income-tested programs (what a
+typical household actually gets) and one including them. Results are
+session-only and never saved with the job, so a quote reopened months later
+cannot re-state a rebate that has since closed. It runs client-side on the
+user's own AI key, like PhotoScan; `ai-providers.js` carries the per-provider
+web-search transport.
+
 **Plans.** The Free plan is one complete load calculation, then an upgrade
 prompt; guests are held to the same ceiling so signing up is never worse than
 not signing up, and an expired trial falls back to Free rather than to a paid
@@ -103,7 +119,7 @@ npm start
 ### Tests
 
 ```bash
-npm test                # 329 hermetic unit checks: load engine, climate engine, energy engine, AI providers, permit search, PhotoScan
+npm test                # 377 hermetic unit checks: load engine, climate engine, energy engine, AI providers, permit search, PhotoScan
 npm run audit:browser   # live-browser regression: app flow, EnvelopeIQ, SalesIQ, nameplate, layout/print, RoomIQ, price book, thinking overlay + free tier (needs network + Playwright's Chromium)
 ```
 

@@ -14,6 +14,11 @@
     photos: [],       // site photos for the report/permit package (this session)
     photoAI: null,    // AI photo analysis: { summary, findings, applied, before, after }
     photoBusy: false, // analysis request in flight
+    // Incentive research is session-only, never stored with the job: a saved
+    // quote reopened months later must not re-state a rebate that has closed.
+    rebates: null,
+    rebateBusy: false,
+    rebateError: null,
     result: null
   };
 
@@ -223,6 +228,9 @@
     state.photos = [];
     state.photoAI = null;
     state.photoBusy = false;
+    state.rebates = null;
+    state.rebateBusy = false;
+    state.rebateError = null;
     if (prop && !prop.error && prop.area) {
       state.property = prop;
     } else {
@@ -445,6 +453,7 @@
       photosCard() +
       photoInsightsCard() +
       permitCard() +
+      rebateCard() +
 
       '<div class="actions">' +
         '<button class="action-btn primary" id="reportBtn"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3a1 1 0 0 1 1-1h7l4 4v3"/><path d="M6 17H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-2"/><rect x="6" y="13" width="12" height="8" rx="1"/></svg>Generate report</button>' +
@@ -476,6 +485,7 @@
     wireFinalRec();
     wireSales();
     wireRooms();
+    wireRebates();
 
     saveActiveToHistory();
     el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1400,6 +1410,213 @@
     });
   }
 
+  // ---------- RebateIQ (Pro/Fleet + trial): live incentive research ----------
+  //
+  // Unlike every other card, this one talks to the live web at the moment the
+  // rep taps it, because incentive programs are the most perishable data in
+  // this business: utility rebates change seasonally, state IRA programs
+  // opened on staggered dates, and budgets run dry mid-year. A table shipped
+  // with the app would be wrong within a quarter and wrong silently.
+  //
+  // Results live in state.rebates (session-only, NOT in state.overrides): a
+  // saved job reopened in March must not quote a rebate that closed in
+  // January. Re-running is one tap.
+
+  function rebateIcon() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>'; }
+
+  function rebateContext() {
+    var g = state.geo || {}, r = state.result, sr = state.salesResult;
+    var ctx = {
+      address: g.label ? shortAddr(g.label) : "",
+      city: g.city || "", county: g.county || "", state: g.state || "", postcode: g.postcode || ""
+    };
+    if (r) {
+      // Send the system actually being proposed: most heat-pump money is
+      // unavailable to a straight AC swap, and nearly every program sets an
+      // efficiency floor, so this is what keeps the list relevant.
+      var fuelLabel = { furnace: "gas furnace + central air conditioner", hp: "electric heat pump", dualfuel: "dual fuel (heat pump + gas furnace)" };
+      ctx.systemType = sr ? (fuelLabel[sr.fuel] || sr.fuel) : "central air conditioner or heat pump";
+      ctx.tons = r.recommendedTons;
+      if (sr && sr.options && sr.options.length) {
+        var best = sr.options[sr.options.length - 1];
+        ctx.seer2 = best.seer2;
+        if (sr.fuel !== "furnace") ctx.hspf2 = best.hspf2;
+      }
+      if (sr && sr.existing && sr.existing.age) ctx.existingAge = sr.existing.age;
+    }
+    return ctx;
+  }
+
+  function runRebateSearch() {
+    var s = loadSettings();
+    if (!s.aiApiKey) {
+      toast("Add an AI provider API key in Settings to use RebateIQ");
+      openSettings();
+      return;
+    }
+    if (state.rebateBusy) return;
+    state.rebateBusy = true;
+    state.rebateError = null;
+    render();
+
+    var work = window.RebateIQ.search(rebateContext(), s, {
+      onStep: function () { if (window.Thinking) window.Thinking.setMessage("Still searching — checking more programs…"); }
+    });
+    if (window.Thinking) {
+      work = window.Thinking.during([
+        "Finding which utilities serve this address…",
+        "Searching federal and state programs…",
+        "Checking utility rebates…",
+        "Checking local and income-qualified programs…",
+        "Reading the fine print…"
+      ], work, 2600);
+    }
+    work.then(function (res) {
+      state.rebates = res;
+      state.rebateBusy = false;
+      render();
+      var card = $("#rebateCard");
+      if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+      toast(res.programs.length
+        ? res.programs.length + " program" + (res.programs.length === 1 ? "" : "s") + " found"
+        : "No programs confirmed for this address");
+    }).catch(function (err) {
+      state.rebateBusy = false;
+      state.rebateError = err && err.message ? err.message : "Rebate research failed.";
+      render();
+    });
+  }
+
+  function rebateCard() {
+    var g = state.geo || {};
+    var cityLabel = g.city ? escapeHtml(g.city) : "this address";
+    if (planTier() < 2) {
+      var cta = planTier() === 0
+        ? '<a class="permit-cta" href="auth.html#signup">Start free trial — unlock RebateIQ</a>'
+        : '<a class="permit-cta" href="index.html#pricing">Upgrade to Pro — unlock RebateIQ</a>';
+      return '' +
+        '<div class="permit-card locked">' +
+          '<div class="hp-head"><span class="ico gold">' + lockIcon() + '</span>RebateIQ™ — grants &amp; rebates<span class="permit-badge">PRO</span></div>' +
+          '<p class="hp-text">Search the live web for every grant, tax credit and utility rebate that applies to ' + cityLabel + ' and the exact system you\'re quoting — with an apply link on every one, and a summary written for the homeowner.</p>' +
+          '<div class="permit-teaser"><div class="tz-row"></div><div class="tz-row w70"></div><div class="tz-row w85"></div><div class="tz-row w60"></div></div>' +
+          cta +
+        '</div>';
+    }
+
+    var rb = state.rebates;
+    var busy = state.rebateBusy;
+    var head =
+      '<div class="hp-head"><span class="ico gold">' + rebateIcon() + '</span>RebateIQ™ — grants &amp; rebates<span class="permit-badge on">PRO</span></div>';
+
+    if (!rb) {
+      return '' +
+        '<div class="permit-card rb-card" id="rebateCard">' + head +
+          '<p class="hp-text">Searches the live web for grants, federal and state tax credits, and the rebates offered by the utilities that actually serve ' + cityLabel + ' — matched to the system you\'re quoting. Every result carries a source and an apply link.</p>' +
+          (state.rebateError ? '<p class="rb-error">' + escapeHtml(state.rebateError) + '</p>' : "") +
+          '<button class="recalc" id="rebateBtn"' + (busy ? " disabled" : "") + '>' +
+            (busy ? '<span class="spin"></span>Searching…' : 'Find grants &amp; rebates') + '</button>' +
+          '<p class="rb-foot">Uses your AI provider key (Settings) and takes 20-60 seconds. Programs change constantly, so this reads the web live rather than a built-in list.</p>' +
+        '</div>';
+    }
+
+    var t = rb.totals;
+    var rows = rb.programs.map(function (p) {
+      var amount = p.amountMax != null ? money(p.amountMax) : (p.amountText ? "" : "Amount varies");
+      return '<div class="rb-prog' + (p.incomeQualified ? " income" : "") + '">' +
+        '<div class="rb-prog-top">' +
+          '<span class="rb-type">' + escapeHtml(p.typeLabel) + '</span>' +
+          (amount ? '<b class="rb-amt">' + amount + '</b>' : "") +
+        '</div>' +
+        '<div class="rb-name">' + escapeHtml(p.name) + '</div>' +
+        (p.administrator ? '<div class="rb-admin">' + escapeHtml(p.administrator) + '</div>' : "") +
+        (p.amountText ? '<div class="rb-line"><span>Worth</span>' + escapeHtml(p.amountText) + '</div>' : "") +
+        (p.requirements ? '<div class="rb-line"><span>Equipment must meet</span>' + escapeHtml(p.requirements) + '</div>' : "") +
+        (p.eligibility ? '<div class="rb-line"><span>Who qualifies</span>' + escapeHtml(p.eligibility) + '</div>' : "") +
+        (p.howToApply ? '<div class="rb-line"><span>How to apply</span>' + escapeHtml(p.howToApply) + '</div>' : "") +
+        (p.deadline ? '<div class="rb-line"><span>Deadline</span>' + escapeHtml(p.deadline) + '</div>' : "") +
+        '<div class="rb-actions">' +
+          '<a class="rb-apply" href="' + escapeAttr(p.applyUrl) + '" target="_blank" rel="noopener noreferrer">Apply' + extLinkIcon() + '</a>' +
+          (p.source !== p.applyUrl ? '<a class="rb-src" href="' + escapeAttr(p.source) + '" target="_blank" rel="noopener noreferrer">Source</a>' : "") +
+        '</div>' +
+      '</div>';
+    }).join("");
+
+    var util = [];
+    if (rb.utilities.electric) util.push("Electric: <b>" + escapeHtml(rb.utilities.electric) + "</b>");
+    if (rb.utilities.gas) util.push("Gas: <b>" + escapeHtml(rb.utilities.gas) + "</b>");
+
+    return '' +
+      '<div class="permit-card rb-card" id="rebateCard">' + head +
+        (rb.programs.length
+          ? '<div class="rb-total">' +
+              '<div class="rb-total-num">' + money(t.capped) + '</div>' +
+              '<div class="rb-total-sub">' + t.countedPrograms + ' program' + (t.countedPrograms === 1 ? "" : "s") + ' with a stated cap, before any income-qualified help' +
+                (t.unknownAmountPrograms ? ' · ' + t.unknownAmountPrograms + ' more with no fixed amount' : "") + '</div>' +
+            '</div>'
+          : '<p class="rb-error">No programs could be confirmed for this address right now. That is a real answer, not a failure — try again after switching providers, or check the utility directly.</p>') +
+        (util.length ? '<p class="rb-util">' + util.join(" &nbsp;·&nbsp; ") + '</p>' : "") +
+        (rb.homeownerSummary ? '<div class="sq-talk rb-talk"><b>Read this to the homeowner</b><p>' + escapeHtml(rb.homeownerSummary) + '</p></div>' : "") +
+        (rb.programs.length ? '<div class="rb-progs">' + rows + '</div>' : "") +
+        (t.withIncome > t.capped
+          ? '<p class="rb-income-note">A further ' + money(t.withIncome - t.capped) + ' is available through income-qualified programs, which are listed above but excluded from the headline figure because most households will not meet the income test.</p>'
+          : "") +
+        '<div class="rb-btns">' +
+          '<button class="rb-again" id="rebateBtn"' + (busy ? " disabled" : "") + '>' + (busy ? "Searching…" : "Search again") + '</button>' +
+          (rb.programs.length && t.capped > 0 ? '<button class="rb-use" id="rebateUseBtn">Apply ' + money(t.capped) + ' to the proposal</button>' : "") +
+        '</div>' +
+        '<p class="rb-foot">Researched live from ' + rb.sources.length + ' source' + (rb.sources.length === 1 ? "" : "s") + '. <b>Verify every program before it goes in a contract</b> — amounts, deadlines and funding change without notice, and a rebate quoted then denied is your problem, not the utility\'s.</p>' +
+      '</div>';
+  }
+
+  function extLinkIcon() { return '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6M10 14L21 3"/></svg>'; }
+
+  function wireRebates() {
+    var btn = $("#rebateBtn");
+    if (btn) btn.addEventListener("click", runRebateSearch);
+    var use = $("#rebateUseBtn");
+    if (use) use.addEventListener("click", function () {
+      var rb = state.rebates;
+      if (!rb || !rb.totals.capped) return;
+      // Applied to the Best option only, and never silently: these figures are
+      // AI-researched and unverified, so putting the same total on all three
+      // tiers would quietly inflate every price on the page.
+      var s = salesState();
+      var i = s.options.length - 1;
+      s.options[i] = s.options[i] || {};
+      s.options[i].rebate = rb.totals.capped;
+      thinkThen("Updating the proposal…", function () {
+        computeSales();
+        render();
+        var card = $("#salesResults");
+        if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+      toast("Applied to the Best option — verify each program before contract");
+    });
+  }
+
+  // Printed appendix: the page the homeowner keeps.
+  function reportRebates() {
+    var rb = state.rebates;
+    if (!rb || planTier() < 2 || !rb.programs.length) return "";
+    var rows = rb.programs.map(function (p) {
+      return '<tr>' +
+        '<td>' + escapeHtml(p.name) + (p.administrator ? '<br/><small>' + escapeHtml(p.administrator) + '</small>' : "") + '</td>' +
+        '<td>' + escapeHtml(p.typeLabel) + (p.incomeQualified ? '<br/><small>income-qualified</small>' : "") + '</td>' +
+        '<td>' + (p.amountMax != null ? money(p.amountMax) : escapeHtml(p.amountText || "varies")) + '</td>' +
+        '<td class="rp-rb-apply">' + escapeHtml(p.applyUrl) + '</td>' +
+      '</tr>';
+    }).join("");
+    return '<div class="rp-block rp-rebates"><h2>Grants, credits &amp; rebates for this address</h2>' +
+      (rb.homeownerSummary ? '<p class="rp-rb-summary">' + escapeHtml(rb.homeownerSummary) + '</p>' : "") +
+      '<table class="rp-rb-table">' +
+        '<tr><th>Program</th><th>Type</th><th>Up to</th><th>Where to apply</th></tr>' + rows +
+      '</table>' +
+      '<p class="rp-permit-note"><b>Estimated total before income-qualified programs: ' + money(rb.totals.capped) + '</b>' +
+        (rb.totals.withIncome > rb.totals.capped ? ' — plus up to ' + money(rb.totals.withIncome - rb.totals.capped) + ' more if the household meets the income limits.' : '') + '</p>' +
+      '<p class="rp-disc" style="margin-top:6px">Researched from public sources on ' + new Date(rb.searchedAt).toLocaleDateString("en-US") + '. Incentive programs change amounts, requirements and deadlines without notice, and funding can be exhausted mid-year. Confirm each program directly with its administrator before relying on it. This is not tax advice.</p>' +
+    '</div>';
+  }
+
   // ---------- RoomIQ (Pro/Fleet + trial): room-by-room comfort diagnosis ----------
   //
   // The whole-house load says how many tons. RoomIQ says which room is the
@@ -2202,6 +2419,7 @@
         '</table></div>' +
         reportReturnAir() +
         reportRooms() +
+        reportRebates() +
         reportProposal() +
         reportPhotos() +
         reportPhotoInsights() +

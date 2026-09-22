@@ -217,6 +217,14 @@ section { padding: 68px 0 0; }
 .vis-svg .vs-num.dim { fill: var(--muted-2); }
 .vis-svg .vs-chip { font: 600 10.5px var(--font); fill: #9fecf4; text-anchor: middle; }
 
+/* RebateIQ rows */
+.reb { display: flex; align-items: center; gap: 10px; padding: 11px 13px; border-radius: 13px; background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border-soft); border-left: 3px solid #7ce0a8; font-size: 13px; }
+.reb.income { border-left-color: #8fa3c7; opacity: 0.8; }
+.reb-t { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: #9ce6bf; flex: none; width: 88px; line-height: 1.25; }
+.reb.income .reb-t { color: #b9c3ff; }
+.reb-n { color: var(--muted); font-size: 12px; }
+.reb b { margin-left: auto; font-variant-numeric: tabular-nums; font-size: 15px; }
+
 /* PermitIQ checklist */
 .chk { display: flex; align-items: center; gap: 10px; padding: 11px 13px; border-radius: 13px; background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border-soft); font-size: 13px; }
 .chk span:not(.chk-i) { color: var(--muted); }

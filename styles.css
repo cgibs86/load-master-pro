@@ -385,6 +385,41 @@ footer .disc { display: block; margin-top: 6px; }
 .pb-note b { color: var(--text); }
 .pb-note.warn { background: rgba(255, 176, 32, 0.09); border-color: rgba(255, 176, 32, 0.28); color: #ffd591; }
 
+/* ---------- RebateIQ (live grant & rebate research) ---------- */
+.rb-card { margin-top: 22px; }
+.rb-card .ico.gold { background: rgba(124, 224, 168, 0.18); color: #9ce6bf; }
+.rb-error { margin: 10px 0 0; padding: 10px 12px; border-radius: 11px; font-size: 12.5px; line-height: 1.6; color: #ffd591; background: rgba(255, 176, 32, 0.1); border: 1px solid rgba(255, 176, 32, 0.3); }
+.rb-total { margin: 14px 0 12px; padding: 16px 18px; border-radius: 14px; text-align: center; background: linear-gradient(165deg, rgba(124, 224, 168, 0.14), rgba(0, 0, 0, 0.22) 65%); border: 1px solid rgba(124, 224, 168, 0.3); }
+.rb-total-num { font-size: 38px; font-weight: 800; letter-spacing: -0.03em; line-height: 1; background: linear-gradient(120deg, #a9f0c8, #3ad7e6); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.rb-total-sub { margin-top: 7px; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+.rb-util { margin: 0 0 12px; font-size: 12px; color: var(--muted); text-align: center; }
+.rb-util b { color: var(--text); }
+.rb-talk { margin-bottom: 14px; }
+.rb-progs { display: grid; gap: 10px; }
+.rb-prog { padding: 13px 14px 12px; border-radius: 13px; background: rgba(0, 0, 0, 0.24); border: 1px solid var(--border-soft); border-left: 3px solid #7ce0a8; }
+.rb-prog.income { border-left-color: #8fa3c7; }
+.rb-prog-top { display: flex; align-items: center; gap: 10px; }
+.rb-type { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: #9ce6bf; background: rgba(124, 224, 168, 0.14); border: 1px solid rgba(124, 224, 168, 0.3); padding: 3px 8px; border-radius: 999px; }
+.rb-prog.income .rb-type { color: #b9c3ff; background: rgba(143, 163, 199, 0.14); border-color: rgba(143, 163, 199, 0.32); }
+.rb-amt { margin-left: auto; font-size: 20px; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.rb-name { margin-top: 9px; font-size: 14.5px; font-weight: 700; line-height: 1.35; }
+.rb-admin { margin-top: 2px; font-size: 11.5px; color: var(--muted); }
+.rb-line { margin-top: 8px; font-size: 12px; color: var(--muted); line-height: 1.55; }
+.rb-line span { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted-2); margin-bottom: 2px; }
+.rb-actions { display: flex; gap: 9px; margin-top: 12px; }
+.rb-apply { display: inline-flex; align-items: center; gap: 6px; padding: 9px 15px; border-radius: 10px; font-size: 13px; font-weight: 700; text-decoration: none; background: var(--grad-cta); color: #06122b; }
+.rb-apply:active { transform: scale(0.99); }
+.rb-src { display: inline-flex; align-items: center; padding: 9px 13px; border-radius: 10px; font-size: 12.5px; font-weight: 600; text-decoration: none; color: var(--muted); border: 1px solid var(--border); }
+.rb-income-note { margin: 12px 0 0; font-size: 11.5px; color: var(--muted); line-height: 1.6; padding: 10px 12px; border-radius: 11px; background: rgba(255, 255, 255, 0.04); border: 1px solid var(--border-soft); }
+.rb-btns { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+.rb-again, .rb-use { flex: 1 1 auto; padding: 12px 14px; border-radius: var(--radius-sm); font-weight: 700; font-size: 14px; cursor: pointer; }
+.rb-again { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+.rb-use { border: none; background: var(--grad-cta); color: #06122b; }
+.rb-again:active, .rb-use:active { transform: scale(0.99); }
+.rb-foot { margin: 12px 0 0; font-size: 11.5px; color: var(--muted); line-height: 1.6; }
+.rb-foot b { color: #ffd591; }
+@media (max-width: 560px) { .rb-actions { flex-wrap: wrap; } .rb-apply, .rb-src { flex: 1 1 auto; justify-content: center; } }
+
 /* ---------- RoomIQ (room-by-room diagnosis) ---------- */
 .rq-card { margin-top: 22px; }
 .rq-card .ico.gold { background: rgba(124, 224, 168, 0.18); color: #9ce6bf; }
@@ -756,6 +791,14 @@ footer .disc { display: block; margin-top: 6px; }
 .rp-final-rec table td { font-size: 13.5px; }
 .rp-final-rec table td:last-child { font-size: 16px; color: #1a3d8f; }
 .rp-permit-sub { font-size: 11.5px; color: #5b6680; line-height: 1.55; margin: 4px 0 10px; }
+.rp-rebates { background: #f4fbf6; border: 1px solid #cfe8da; border-radius: 12px; padding: 14px 16px 16px; }
+.rp-rebates h2 { color: #2f8f5f; border-bottom-color: #cfe8da; }
+.rp-rb-summary { font-size: 13px; line-height: 1.55; margin: 0 0 10px; color: #1a2b4d; }
+.rp-rb-table th { font-size: 11.5px; text-align: left; padding: 6px 4px; border-bottom: 2px solid #cfe8da; text-transform: uppercase; letter-spacing: 0.03em; color: #5b6680; }
+.rp-rb-table td { font-size: 12px; padding: 7px 4px; text-align: left; vertical-align: top; }
+.rp-rb-table td small { color: #5b6680; font-size: 10.5px; }
+.rp-rb-table td:nth-child(3) { font-weight: 700; white-space: nowrap; }
+.rp-rb-apply { font-size: 10px; color: #2f6fe0; word-break: break-all; }
 .rp-rooms { background: #f5fbf7; border: 1px solid #cfe8da; border-radius: 12px; padding: 14px 16px 16px; }
 .rp-rooms h2 { color: #2f8f5f; border-bottom-color: #cfe8da; }
 .rp-room-table th { font-size: 11.5px; text-align: right; padding: 6px 4px; border-bottom: 2px solid #cfe8da; text-transform: uppercase; letter-spacing: 0.03em; color: #5b6680; }
