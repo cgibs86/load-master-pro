@@ -494,6 +494,7 @@
 
   <script src="config.js"></script>
   <script src="thinking.js"></script>
+  <script src="sw-register.js"></script>
   <script>
   // Every CTA on this page leaves for another page. Without an acknowledgement
   // a tap on a slow connection looks like nothing happened, and people tap again.
@@ -526,11 +527,6 @@
     }, { threshold: 0.12, rootMargin: "0px 0px -40px 0px" });
     els.forEach(function (el) { io.observe(el); });
   })();
-  // Register the same service worker app.html uses, so the "installs like
-  // an app" claim holds for whichever page a visitor lands on first.
-  if ("serviceWorker" in navigator) {
-    window.addEventListener("load", function () { navigator.serviceWorker.register("service-worker.js").catch(function () {}); });
-  }
   </script>
 </body>
 </html>

@@ -67,6 +67,14 @@ boundary rather than a security control — server-enforced entitlements come
 with the Supabase work in SETUP.md. Paid plans are Solo $199/mo, Pro $499/mo,
 and Fleet by quote.
 
+**Caching.** The service worker is network-first for code (documents, JS, CSS,
+the manifest) with a 3.5s timeout and a cache fallback, and cache-first only
+for images. It was cache-first for everything, which meant a deploy was always
+one visit behind: the old copy was served immediately and the new one landed
+in the cache for next time. `sw-register.js` fetches the worker script past the
+HTTP cache, re-checks on tab focus, and reloads once when a new worker takes
+over, so an open tab picks up a deploy instead of sitting on a stale page.
+
 > **Estimating tool only.** Results are a Manual J–style approximation for quick
 > sizing guidance — not a stamped engineering report. Confirm final equipment
 > sizing with a licensed HVAC professional.

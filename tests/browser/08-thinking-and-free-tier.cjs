@@ -59,7 +59,10 @@ async function runCalc(page, addr) {
     ok("it is announced to screen readers", mid.live === "polite");
 
     await page.waitForSelector("#reportBtn", { timeout: 40000 });
-    await page.waitForSelector(".thinking:not(.on)", { timeout: 8000 });
+    // Wait on the class, not on visibility: a dismissed overlay is
+    // `visibility: hidden`, so waitForSelector's default "visible" state can
+    // never be satisfied and only passed before by catching the fade mid-transition.
+    await page.waitForFunction(() => !document.querySelector(".thinking.on"), null, { timeout: 8000 });
     ok("overlay comes down when the calculation finishes", true);
     ok("scroll lock is released", !(await page.evaluate(() => document.body.classList.contains("thinking-open"))));
     await page.waitForTimeout(2200);
