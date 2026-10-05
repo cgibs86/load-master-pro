@@ -233,6 +233,23 @@ section { padding: 68px 0 0; }
 .chk.warn .chk-i { background: rgba(255, 193, 87, 0.16); color: #ffc157; }
 .chk-note { font-size: 11.5px; color: var(--muted-2); text-align: center; margin-top: 2px; }
 
+/* JobIQ — the job type list */
+.jb { display: flex; align-items: center; gap: 10px; padding: 10px 13px; border-radius: 13px;
+  background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border-soft); font-size: 13px; }
+.jb span { color: var(--muted); }
+.jb b { margin-left: auto; font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--muted-2); white-space: nowrap; }
+.jb.on { background: rgba(58, 215, 230, 0.12); border-color: rgba(58, 215, 230, 0.4); }
+.jb.on span { color: var(--text); font-weight: 600; }
+.jb.on b { color: var(--cyan); }
+
+/* ServiceTitan hand-off — the pasted job note */
+.tn { display: flex; align-items: center; gap: 10px; padding: 10px 13px; font-size: 13px;
+  border-bottom: 1px dashed var(--border-soft); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.tn:last-of-type { border-bottom: none; }
+.tn span { color: var(--muted-2); }
+.tn b { margin-left: auto; color: var(--text); font-variant-numeric: tabular-nums; }
+
 /* RoomIQ airflow bars */
 .rm { padding: 10px 13px 12px; border-radius: 13px; background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border-soft); border-left: 3px solid #8fa3c7; }
 .rm-top { display: flex; align-items: baseline; gap: 10px; font-size: 13px; }
@@ -245,7 +262,7 @@ section { padding: 68px 0 0; }
 .rm.ok { border-left-color: #7ce0a8; } .rm.ok .rm-track i { background: #7ce0a8; }
 .rm.over { border-left-color: #3ad7e6; } .rm.over .rm-track i { background: #3ad7e6; } .rm.over .rm-top b { color: #9fecf4; }
 
-/* SalesIQ cost bars */
+/* EnergyIQ running-cost bars */
 .opt { padding: 10px 13px 12px; border-radius: 13px; background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border-soft); }
 .opt-top { display: flex; align-items: baseline; gap: 10px; font-size: 13px; }
 .opt-top span { color: var(--muted); }

@@ -42,7 +42,10 @@ async function addRoom(page, i, r) {
   await page.waitForTimeout(1800);
   const sug = await page.$("#suggest > *"); if (sug) await sug.click();
   await page.waitForTimeout(400);
-  if (!(await page.$(".loading, #reportBtn"))) await page.click("#calcBtn");
+  // Only start a run if the suggestion click did not: clicking Calculate as
+  // well starts a SECOND calculation, whose finish re-renders the results and
+  // throws away anything typed into them in between.
+  if (!sug) await page.click("#calcBtn");
   await page.waitForSelector("#reportBtn", { timeout: 40000 });
   await page.waitForTimeout(2500);
 
@@ -99,7 +102,7 @@ async function addRoom(page, i, r) {
   await p2.fill("#address", "2100 Westheimer Rd, Houston, TX"); await p2.waitForTimeout(1500);
   const s2 = await p2.$("#suggest > *"); if (s2) await s2.click();
   await p2.waitForTimeout(400);
-  if (!(await p2.$(".loading, #reportBtn"))) await p2.click("#calcBtn");
+  if (!s2) await p2.click("#calcBtn");
   await p2.waitForSelector("#reportBtn", { timeout: 40000 }); await p2.waitForTimeout(600);
   const guest = await p2.evaluate(() => Array.from(document.querySelectorAll(".permit-card.locked")).map(e => e.innerText.slice(0, 30)));
   ok("guest sees the locked RoomIQ teaser", guest.some(t => /RoomIQ/.test(t)), guest.join(" | "));

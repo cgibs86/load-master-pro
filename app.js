@@ -14,6 +14,10 @@
     photos: [],       // site photos for the report/permit package (this session)
     photoAI: null,    // AI photo analysis: { summary, findings, applied, before, after }
     photoBusy: false, // analysis request in flight
+    // What kind of job this is. Set before the calculation, remembered across
+    // jobs, and the strongest single input to the incentive search.
+    jobType: null,
+    jobCustom: "",
     // Incentive research is session-only, never stored with the job: a saved
     // quote reopened months later must not re-state a rebate that has closed.
     rebates: null,
@@ -157,8 +161,24 @@
   }
 
   // ---------- Orchestration ----------
+  /*
+   * Only the newest run may finish.
+   *
+   * Three things can start a calculation — the Calculate button, a tap on an
+   * address suggestion, and a saved job — and more than one can be in flight
+   * at a time (a slow suggestion click followed by Calculate, or an impatient
+   * double tap). finishRun wipes the overrides, so a straggler landing after
+   * the rep had already filled in the current system or the fine-tune fields
+   * silently erased their work and left the page looking finished. Every
+   * starter takes a token; a result whose token is stale is dropped.
+   */
+  var runSeq = 0;
+  function newRunToken() { return ++runSeq; }
+  function isCurrentRun(token) { return token === runSeq; }
+
   function run(address) {
     if (blockIfFreeLimitReached()) return;
+    var token = newRunToken();
     activeHistoryId = null;
     setLoading(true, "Locating address…");
     clearError();
@@ -169,8 +189,9 @@
         setLoading(true, "Analyzing 8,760 hrs of climate…");
         return resolveClimateAndProperty(geo, address);
       })
-      .then(function (prop) { finishRun(prop); })
+      .then(function (prop) { finishRun(prop, token); })
       .catch(function (err) {
+        if (!isCurrentRun(token)) return;
         setLoading(false);
         showError(err.message || "Something went wrong. Please try again.");
       });
@@ -178,13 +199,14 @@
 
   function runFromCoords(geo) {
     if (blockIfFreeLimitReached()) return;
+    var token = newRunToken();
     activeHistoryId = null;
     setLoading(true, "Analyzing 8,760 hrs of climate…");
     clearError();
     state.geo = geo;
     resolveClimateAndProperty(geo, geo.label)
-      .then(finishRun)
-      .catch(function () { finishRun(null); });
+      .then(function (prop) { finishRun(prop, token); })
+      .catch(function () { finishRun(null, token); });
   }
 
   // TrueClimate: live per-address design conditions (Open-Meteo year of hourly
@@ -223,7 +245,9 @@
     });
   }
 
-  function finishRun(prop) {
+  function finishRun(prop, token) {
+    if (token != null && !isCurrentRun(token)) return;
+    clearInputDraft();
     state.overrides = {};
     state.photos = [];
     state.photoAI = null;
@@ -256,7 +280,14 @@
     var quality = o.quality || pa.quality || window.LoadCalc.qualityFromYear(p.yearBuilt) || "average";
     var foundation = o.foundation || pa.foundation || "slab";
     var sun = o.sun || pa.sun || "average";
-    var systemType = o.systemType || "single";
+    /*
+     * The job type says what is being installed, so it supplies the stage
+     * family and the duct assumption — but only as a default. Anything the
+     * rep typed in Fine-tune inputs still wins, which is the same precedence
+     * every other input in this app follows.
+     */
+    var jobHints = window.JobTypes ? window.JobTypes.calcHints(jobTypeId()) : {};
+    var systemType = o.systemType || jobHints.systemType || "single";
     var ceiling = o.ceiling != null ? o.ceiling : (pa.ceiling != null ? pa.ceiling : 9);
     var rangePct = p.source === "fetched" ? 0.10 : 0.15;
     // Photo evidence tightens the confidence band a notch on estimated homes.
@@ -267,7 +298,7 @@
     var windowU = o.windowU != null ? o.windowU : undefined;
     var windowSHGC = o.windowSHGC != null ? o.windowSHGC : undefined;
     var ach = o.ach != null ? o.ach : undefined;
-    var ductType = o.ductType || undefined;
+    var ductType = o.ductType || jobHints.ductType || undefined;
     var ductCondition = o.ductCondition || undefined;
     var retAirMode = o.retAirMode || undefined;
     var retAirDuctIn = o.retAirDuctIn != null ? o.retAirDuctIn : undefined;
@@ -339,7 +370,7 @@
       requiredCfm: state.result.equipment.airflowCfm,
       tons: state.result.recommendedTons
     }) : null;
-    computeSales();
+    computeEnergy();
     computeRooms();
   }
 
@@ -448,6 +479,7 @@
           '</div>' +
       '</div>' +
 
+      jobTypeCard() +
       hpCard(r, c) +
       envelopeCard(r) +
       photosCard() +
@@ -464,8 +496,9 @@
       adjustBlock(e, p) +
 
       finalRecommendationCard(r, e, c) +
+      exportCard() +
       roomCard() +
-      salesCard();
+      energyCard();
 
     var el = $("#results");
     el.innerHTML = html;
@@ -476,15 +509,19 @@
 
     animateCounts();
     wireAdjust();
+    restoreInputDraft();
     var ac = $("#adjustChip");
-    if (ac) ac.addEventListener("click", function () { var d = $("#adjustDetails"); if (d) { d.open = true; d.scrollIntoView({ behavior: "smooth", block: "center" }); } });
+    if (ac) ac.addEventListener("click", function () { var d = $("#adjustDetails"); if (d) { d.open = true; draftPanelOpen = true; d.scrollIntoView({ behavior: "smooth", block: "center" }); } });
     $("#reportBtn").addEventListener("click", function () { thinkThen("Building your report…", function () { generateReport({}); }); });
     $("#shareBtn").addEventListener("click", shareResult);
     wirePhotos();
     wirePermit();
     wireFinalRec();
-    wireSales();
+    wireEnergy();
     wireRooms();
+    wireExport();
+    var jobChange = $("#jobChangeBtn");
+    if (jobChange) jobChange.addEventListener("click", openJobSheet);
     wireRebates();
 
     saveActiveToHistory();
@@ -516,7 +553,7 @@
       aiBlock = state.photoBusy
         ? '<button class="action-btn primary ai-btn" disabled><span class="spin"></span>Reading photos…</button>'
         : '<button class="action-btn primary ai-btn" id="aiAnalyzeBtn">' + sparkIcon() + (state.photoAI ? 'Re-analyze photos with AI' : 'Analyze photos with AI') + '</button>' +
-          '<p class="ai-note">Optional. AI reads sun exposure, windows, insulation and size from your shots and tunes the load numbers — and if you snap the old unit\'s data plate, it pre-fills the current-system fields in SalesIQ. Uses your AI provider key (Settings).</p>';
+          '<p class="ai-note">Optional. AI reads sun exposure, windows, insulation and size from your shots and tunes the load numbers — and if you snap the old unit\'s data plate, it pre-fills the current-system fields in EnergyIQ. Uses your AI provider key (Settings).</p>';
     }
     return '' +
       '<div class="photos-card">' +
@@ -660,10 +697,10 @@
       if (!w || w.confidence !== "high" || f.confidence === "high") winners[f.field] = f;
     });
     // Data-plate reads (existingTons/Year/Seer/Heat) don't touch the load —
-    // they pre-fill SalesIQ's "customer's current system", where a value the
+    // they pre-fill EnergyIQ's "customer's current system", where a value the
     // rep already typed wins the same way a manual override wins below.
     var EXISTING_FIELD_KEY = { existingTons: "tons", existingYear: "year", existingSeer: "seer", existingHeat: "heatType" };
-    var ex = salesState().existing;
+    var ex = energyState().existing;
     var exTouched = ex.tons != null || ex.year != null || ex.seer != null;
     res.findings.forEach(function (f) {
       f.status = "info";
@@ -898,16 +935,40 @@
     var hpNote = hp.auxBtu > 500
       ? 'covers this home down to about <b>' + hp.balanceF + '°F</b>; below that, plan on ≈<b>' + hp.auxKw + ' kW</b> (' + fmt(hp.auxBtu) + ' BTU/h) of backup heat at the ' + c.heating99 + '°F design low.'
       : 'covers this home alone all the way to the ' + c.heating99 + '°F design low — no backup heat needed.';
+    /*
+     * The four rows below are four different right answers, and which one is
+     * THE answer depends entirely on what is being installed. Now that the job
+     * type is known, say so: mark the matching row and lead the sentence with
+     * it, instead of handing the rep a table and leaving the choice to them.
+     */
+    var job = jobType();
+    // Exactly one row is the answer, and it is the most specific one: a
+    // variable-capacity heat pump belongs on the variable row, not on both it
+    // and the generic heat-pump row — two marks make the rep choose again.
+    var jobRow = job ? (job.systemType || (job.fuel === "heat-pump" || job.fuel === "geothermal" ? "hp" : null)) : null;
+    function recRow(key, label, tons, extraCls) {
+      var mine = jobRow === key;
+      return '<div class="final-rec-row' + (extraCls ? " " + extraCls : "") + (mine ? " picked" : "") + '">' +
+        '<span>' + label + (mine ? '<em class="rec-this">this job</em>' : "") + '</span>' +
+        '<b>' + tons + ' tons' + (key === "hp" ? "*" : "") + '</b></div>';
+    }
+    var leadIn = job && job.needsLoad === false
+      ? 'for this home\'s ' + fmt(r.cooling.total) + ' BTU/h design cooling load. ' +
+        'This job installs no equipment, so the sizes below are the yardstick for whatever is already in the house:'
+      : jobRow
+        ? 'for this home\'s ' + fmt(r.cooling.total) + ' BTU/h design cooling load, sized for the ' +
+          escapeHtml(job.label) + ' being quoted. The other families are listed so a change of plan does not need a new calculation:'
+        : 'for this home\'s ' + fmt(r.cooling.total) + ' BTU/h design cooling load. The right number below depends on which kind of system actually goes in the house:';
     return '' +
       '<div class="final-rec">' +
         '<div class="final-rec-head">LoadMaster Pro AI recommends a</div>' +
         '<div class="final-rec-tons">' + r.recommendedTons + '<span>-ton system</span></div>' +
-        '<p class="final-rec-sub">for this home\'s ' + fmt(r.cooling.total) + ' BTU/h design cooling load. The right number below depends on which kind of system actually goes in the house:</p>' +
+        '<p class="final-rec-sub">' + leadIn + '</p>' +
         '<div class="final-rec-grid">' +
-          '<div class="final-rec-row"><span>Single-stage A/C or gas furnace split system</span><b>' + r.sizing.single + ' tons</b></div>' +
-          '<div class="final-rec-row"><span>Two-stage system</span><b>' + r.sizing.two + ' tons</b></div>' +
-          '<div class="final-rec-row"><span>Variable-capacity (inverter) system</span><b>' + r.sizing.variable + ' tons</b></div>' +
-          '<div class="final-rec-row hp"><span>Heat pump (any stage)</span><b>' + r.recommendedTons + ' tons*</b></div>' +
+          recRow("single", "Single-stage A/C or gas furnace split system", r.sizing.single) +
+          recRow("two", "Two-stage system", r.sizing.two) +
+          recRow("variable", "Variable-capacity (inverter) system", r.sizing.variable) +
+          recRow("hp", "Heat pump (any stage)", r.recommendedTons, "hp") +
         '</div>' +
         manualSFitNote(r) +
         shrNote(r) +
@@ -1179,6 +1240,64 @@
     return "";
   }
 
+  /*
+   * Keeping what the rep typed across a re-render.
+   *
+   * The whole results page is rebuilt from state whenever anything finishes —
+   * a photo analysis, an incentive search, a job-type change — and the
+   * fine-tune fields are read only when Recalculate is pressed. So a rep could
+   * measure the attic, type R-19, have a background job land, and silently get
+   * a load computed from R-38 instead. Worse than losing the number is keeping
+   * the result: the page still looks finished.
+   *
+   * Every edit inside the fine-tune panel is therefore stashed by element id
+   * and written back after each render, along with the panel's open state and
+   * the lit construction-tier button. The stash is dropped when a new
+   * calculation starts, because it belongs to the old house.
+   */
+  var inputDraft = {};
+  var draftPanelOpen = false;
+
+  function draftScope(el) {
+    return el && el.id && el.closest && el.closest("#adjustDetails") ? el : null;
+  }
+  function rememberDraft(ev) {
+    var el = draftScope(ev.target);
+    if (el) inputDraft[el.id] = el.value;
+  }
+  function clearInputDraft() { inputDraft = {}; draftPanelOpen = false; }
+  function restoreInputDraft() {
+    var panel = $("#adjustDetails");
+    if (panel && draftPanelOpen) panel.open = true;
+    Object.keys(inputDraft).forEach(function (id) {
+      var el = $("#" + id);
+      // Only inside the panel: an id reused elsewhere must not be written to.
+      if (el && el.closest("#adjustDetails") && el.value !== inputDraft[id]) el.value = inputDraft[id];
+    });
+    if (inputDraft.__quality) {
+      var seg = $("#segQuality");
+      if (seg) seg.querySelectorAll("button[data-q]").forEach(function (b) {
+        b.classList.toggle("on", b.getAttribute("data-q") === inputDraft.__quality);
+      });
+    }
+  }
+  // Attached once to the container, which survives every re-render of its
+  // contents, so there is nothing to re-wire.
+  function wireInputDraft() {
+    var root = $("#results");
+    if (!root) return;
+    root.addEventListener("input", rememberDraft);
+    root.addEventListener("change", rememberDraft);
+    root.addEventListener("click", function (ev) {
+      var q = ev.target.closest && ev.target.closest("#segQuality button[data-q]");
+      if (q) inputDraft.__quality = q.getAttribute("data-q");
+      // <details> toggles after the click event, so read the real state next tick
+      // rather than guessing the inverse of the current one.
+      var sum = ev.target.closest && ev.target.closest("#adjustDetails > summary");
+      if (sum) setTimeout(function () { var d = $("#adjustDetails"); draftPanelOpen = !!(d && d.open); }, 0);
+    });
+  }
+
   function wireAdjust() {
     var seg = $("#segQuality");
     if (seg) {
@@ -1296,120 +1415,6 @@
     });
   }
 
-  // ---------- Price book (Settings): the shop's own equipment and pricing ----------
-  //
-  // Saved once on the device, then SalesIQ fills itself on every job at the
-  // exact tonnage Manual S picked for each stage type. A rep who has filled
-  // this in never types a price at a kitchen table again.
-
-  function priceBookGroupHtml() {
-    var book = window.PriceBook.load();
-    var PB = window.PriceBook;
-    var rows = book.entries.map(function (e, i) {
-      var priceLabel = e.pricing === "flat" ? (e.flatPrice != null ? money(e.flatPrice) + " flat" : "no price set")
-        : e.pricing === "perTon" ? money(e.basePrice || 0) + " + " + money(e.perTon || 0) + "/ton"
-        : Object.keys(e.bySize).length + " sizes priced";
-      var eff = [e.seer2 ? e.seer2 + " SEER2" : null, e.afue ? Math.round(e.afue * 100) + "% AFUE" : null, e.hspf2 ? e.hspf2 + " HSPF2" : null].filter(Boolean).join(" · ");
-      return '<div class="pb-row" data-i="' + i + '">' +
-        '<div class="pb-row-main">' +
-          '<b>' + escapeHtml(e.name) + '</b>' +
-          '<span>' + PB.TIER_LABEL[e.tier] + ' · ' + PB.STAGE_LABEL[e.stage] + ' · ' + PB.FUEL_LABEL[e.fuel] + '</span>' +
-          '<span>' + escapeHtml(priceLabel) + (eff ? ' · ' + escapeHtml(eff) : "") + (e.rebate ? ' · ' + money(e.rebate) + ' rebate' : "") + '</span>' +
-        '</div>' +
-        '<button class="pb-del" data-pbdel="' + i + '" title="Remove" aria-label="Remove">×</button>' +
-      '</div>';
-    }).join("");
-
-    return '' +
-      '<div class="set-group"><div class="set-title">Price book' + (planTier() < 2 ? ' <span class="permit-badge">PRO</span>' : '') + '</div>' +
-      (planTier() < 2
-        ? '<p class="sub"><span class="ico gold">' + lockIcon() + '</span> The price book fills SalesIQ proposals automatically. You can build it now; it applies once you upgrade.</p>'
-        : '<p class="sub">Your equipment and pricing, saved on this device. SalesIQ fills each proposal from it at the exact tonnage this house needs, so you never type a price at the kitchen table.</p>') +
-      '<div class="pb-list" id="pbList">' + (rows || '<p class="pb-empty">No equipment saved yet. Add your lines below, or start from a template and edit the prices.</p>') + '</div>' +
-      '<div class="pb-add" id="pbAdd">' +
-        '<label>Add equipment</label>' +
-        '<input type="text" id="pbName" placeholder="e.g. Carrier Infinity 24VNA6" />' +
-        '<div class="set-two">' +
-          '<div><label>Tier</label>' + selectHtml("pbTier", "good", PB.TIERS.map(function (t) { return [t, PB.TIER_LABEL[t]]; })) + '</div>' +
-          '<div><label>Stage</label>' + selectHtml("pbStage", "single", PB.STAGES.map(function (t) { return [t, PB.STAGE_LABEL[t]]; })) + '</div>' +
-        '</div>' +
-        '<div class="set-two">' +
-          '<div><label>System type</label>' + selectHtml("pbFuel", "furnace", PB.FUELS.map(function (t) { return [t, PB.FUEL_LABEL[t]]; })) + '</div>' +
-          '<div><label>Pricing</label>' + selectHtml("pbPricing", "perTon", [["perTon", "Base + per ton"], ["flat", "One flat price"]]) + '</div>' +
-        '</div>' +
-        '<div class="set-two" id="pbPerTonWrap">' +
-          '<div><label>Base price</label><input type="number" id="pbBase" min="0" step="100" placeholder="4500" /></div>' +
-          '<div><label>Per ton</label><input type="number" id="pbPerTon" min="0" step="100" placeholder="1800" /></div>' +
-        '</div>' +
-        '<div id="pbFlatWrap" style="display:none"><label>Installed price</label><input type="number" id="pbFlat" min="0" step="100" placeholder="12000" /></div>' +
-        '<div class="set-two">' +
-          '<div><label>SEER2</label><input type="number" id="pbSeer" min="10" max="40" step="0.1" placeholder="16" /></div>' +
-          '<div><label>AFUE % / HSPF2</label><input type="number" id="pbEff2" min="0" max="100" step="0.1" placeholder="96 or 8.5" /></div>' +
-        '</div>' +
-        '<div><label>Standing rebate or credit</label><input type="number" id="pbRebate" min="0" step="50" placeholder="0" /></div>' +
-        '<div class="pb-btns">' +
-          '<button class="pb-btn" id="pbAddBtn">Add to price book</button>' +
-          (book.entries.length ? "" : '<button class="pb-btn ghost" id="pbSeedBtn">Start from a template</button>') +
-        '</div>' +
-      '</div>' +
-      '<div class="status">' + (book.entries.length
-        ? "✓ " + book.entries.length + " item" + (book.entries.length === 1 ? "" : "s") + " saved on this device. SalesIQ uses them automatically."
-        : "Nothing saved yet — SalesIQ will ask you to type prices until you add your equipment here.") + '</div>' +
-      '</div>';
-  }
-
-  function wirePriceBook() {
-    var PB = window.PriceBook;
-    var pricingSel = $("#pbPricing");
-    if (pricingSel) pricingSel.addEventListener("change", function () {
-      var flat = pricingSel.value === "flat";
-      $("#pbFlatWrap").style.display = flat ? "" : "none";
-      $("#pbPerTonWrap").style.display = flat ? "none" : "";
-    });
-    var addBtn = $("#pbAddBtn");
-    if (addBtn) addBtn.addEventListener("click", function () {
-      var name = ($("#pbName").value || "").trim();
-      if (!name) { toast("Give the equipment a name first"); $("#pbName").focus(); return; }
-      function n(id) { var v = parseFloat($("#" + id).value); return isFinite(v) ? v : null; }
-      var fuel = $("#pbFuel").value;
-      var eff2 = n("pbEff2");
-      // One field for the heating rating, read as AFUE for a furnace and as
-      // HSPF2 for a heat pump — a rep should not have to know which box to use.
-      var entry = {
-        name: name, tier: $("#pbTier").value, stage: $("#pbStage").value, fuel: fuel,
-        pricing: $("#pbPricing").value,
-        flatPrice: n("pbFlat"), basePrice: n("pbBase"), perTon: n("pbPerTon"),
-        seer2: n("pbSeer"), rebate: n("pbRebate"),
-        afue: fuel !== "hp" ? eff2 : null,
-        hspf2: fuel !== "furnace" ? (fuel === "hp" ? eff2 : null) : null
-      };
-      var clean = PB.normalizeEntry(entry);
-      if (!clean) { toast("That entry couldn't be saved — check the name and price"); return; }
-      var book = PB.load();
-      book.entries.push(clean);
-      PB.save(book);
-      toast(clean.name + " added to your price book");
-      openSettings();   // re-render the sheet so the new row shows
-    });
-    var seed = $("#pbSeedBtn");
-    if (seed) seed.addEventListener("click", function () {
-      PB.save({ entries: PB.starterEntries() });
-      toast("Template added — edit the prices to match your shop");
-      openSettings();
-    });
-    var list = $("#pbList");
-    if (list) list.addEventListener("click", function (ev) {
-      var btn = ev.target.closest("[data-pbdel]");
-      if (!btn) return;
-      var i = parseInt(btn.getAttribute("data-pbdel"), 10);
-      var book = PB.load();
-      var removed = book.entries.splice(i, 1)[0];
-      PB.save(book);
-      toast(removed ? removed.name + " removed" : "Removed");
-      openSettings();
-    });
-  }
-
   // ---------- RebateIQ (Pro/Fleet + trial): live incentive research ----------
   //
   // Unlike every other card, this one talks to the live web at the moment the
@@ -1425,24 +1430,36 @@
   function rebateIcon() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>'; }
 
   function rebateContext() {
-    var g = state.geo || {}, r = state.result, sr = state.salesResult;
+    var g = state.geo || {}, r = state.result, er = state.energyResult;
     var ctx = {
       address: g.label ? shortAddr(g.label) : "",
       city: g.city || "", county: g.county || "", state: g.state || "", postcode: g.postcode || ""
     };
+    /*
+     * The job type is the single most important thing to send. Incentive
+     * programs are organised by MEASURE, not by house: duct sealing, a
+     * ductless mini-split, attic insulation and a heat-pump water heater are
+     * four separate programs with separate money and separate forms. Asking
+     * for "HVAC rebates" on a duct job returns the wrong programs entirely.
+     */
+    var jq = window.JobTypes ? window.JobTypes.rebateQuery(jobTypeId(), jobTypeCustom()) : null;
+    if (jq) {
+      ctx.jobType = jq.label;
+      ctx.jobTerms = jq.terms;
+      ctx.jobCustom = jq.custom;
+      ctx.systemType = jq.label;
+      ctx.fuel = jq.fuel;
+    }
     if (r) {
-      // Send the system actually being proposed: most heat-pump money is
-      // unavailable to a straight AC swap, and nearly every program sets an
-      // efficiency floor, so this is what keeps the list relevant.
-      var fuelLabel = { furnace: "gas furnace + central air conditioner", hp: "electric heat pump", dualfuel: "dual fuel (heat pump + gas furnace)" };
-      ctx.systemType = sr ? (fuelLabel[sr.fuel] || sr.fuel) : "central air conditioner or heat pump";
       ctx.tons = r.recommendedTons;
-      if (sr && sr.options && sr.options.length) {
-        var best = sr.options[sr.options.length - 1];
+      // Most programs set an efficiency floor, so send the level being
+      // considered rather than leaving the search to guess.
+      if (er && er.options && er.options.length) {
+        var best = er.options[er.options.length - 1];
         ctx.seer2 = best.seer2;
-        if (sr.fuel !== "furnace") ctx.hspf2 = best.hspf2;
+        if (er.fuel !== "furnace" && er.fuel !== "resistance") ctx.hspf2 = best.hspf2;
       }
-      if (sr && sr.existing && sr.existing.age) ctx.existingAge = sr.existing.age;
+      if (er && er.existing && er.existing.age) ctx.existingAge = er.existing.age;
     }
     return ctx;
   }
@@ -1472,6 +1489,13 @@
       ], work, 2600);
     }
     work.then(function (res) {
+      // Stamp the job the search was actually run for. If the rep changes the
+      // job type afterwards, the programs on screen are still the old job's,
+      // and the card has to say so rather than silently relabelling itself.
+      var jt = jobType();
+      res.jobLabel = jt ? jt.label : "";
+      res.jobId = jobTypeId();
+      res.jobCustom = jobTypeCustom();
       state.rebates = res;
       state.rebateBusy = false;
       render();
@@ -1541,6 +1565,19 @@
       '</div>';
     }).join("");
 
+    // Which measure this list belongs to, and whether it still matches the job
+    // now selected. Programs are measure-specific, so a list searched for duct
+    // sealing must not sit silently under a heat-pump job.
+    var stale = rb.jobId && rb.jobId !== jobTypeId();
+    var jobLine = rb.jobLabel
+      ? '<p class="rb-job' + (stale ? " stale" : "") + '">' +
+          (stale
+            ? 'These programs were found for <b>' + escapeHtml(rb.jobLabel) + '</b> — the job is now <b>' +
+              escapeHtml(jobType() ? jobType().label : "") + '</b>. Search again for the right programs.'
+            : 'Programs for <b>' + escapeHtml(rb.jobLabel) + '</b>' + (rb.jobCustom ? ' — ' + escapeHtml(rb.jobCustom) : "")) +
+        '</p>'
+      : "";
+
     var util = [];
     if (rb.utilities.electric) util.push("Electric: <b>" + escapeHtml(rb.utilities.electric) + "</b>");
     if (rb.utilities.gas) util.push("Gas: <b>" + escapeHtml(rb.utilities.gas) + "</b>");
@@ -1554,6 +1591,7 @@
                 (t.unknownAmountPrograms ? ' · ' + t.unknownAmountPrograms + ' more with no fixed amount' : "") + '</div>' +
             '</div>'
           : '<p class="rb-error">No programs could be confirmed for this address right now. That is a real answer, not a failure — try again after switching providers, or check the utility directly.</p>') +
+        jobLine +
         (util.length ? '<p class="rb-util">' + util.join(" &nbsp;·&nbsp; ") + '</p>' : "") +
         (rb.homeownerSummary ? '<div class="sq-talk rb-talk"><b>Read this to the homeowner</b><p>' + escapeHtml(rb.homeownerSummary) + '</p></div>' : "") +
         (rb.programs.length ? '<div class="rb-progs">' + rows + '</div>' : "") +
@@ -1562,7 +1600,7 @@
           : "") +
         '<div class="rb-btns">' +
           '<button class="rb-again" id="rebateBtn"' + (busy ? " disabled" : "") + '>' + (busy ? "Searching…" : "Search again") + '</button>' +
-          (rb.programs.length && t.capped > 0 ? '<button class="rb-use" id="rebateUseBtn">Apply ' + money(t.capped) + ' to the proposal</button>' : "") +
+
         '</div>' +
         '<p class="rb-foot">Researched live from ' + rb.sources.length + ' source' + (rb.sources.length === 1 ? "" : "s") + '. <b>Verify every program before it goes in a contract</b> — amounts, deadlines and funding change without notice, and a rebate quoted then denied is your problem, not the utility\'s.</p>' +
       '</div>';
@@ -1573,25 +1611,10 @@
   function wireRebates() {
     var btn = $("#rebateBtn");
     if (btn) btn.addEventListener("click", runRebateSearch);
-    var use = $("#rebateUseBtn");
-    if (use) use.addEventListener("click", function () {
-      var rb = state.rebates;
-      if (!rb || !rb.totals.capped) return;
-      // Applied to the Best option only, and never silently: these figures are
-      // AI-researched and unverified, so putting the same total on all three
-      // tiers would quietly inflate every price on the page.
-      var s = salesState();
-      var i = s.options.length - 1;
-      s.options[i] = s.options[i] || {};
-      s.options[i].rebate = rb.totals.capped;
-      thinkThen("Updating the proposal…", function () {
-        computeSales();
-        render();
-        var card = $("#salesResults");
-        if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
-      toast("Applied to the Best option — verify each program before contract");
-    });
+    // There is deliberately no "apply to the proposal" action any more: this
+    // app no longer builds proposals, and an unverified researched figure
+    // should reach a customer's price through the shop's quoting software,
+    // where someone checks it, rather than through a one-tap shortcut here.
   }
 
   // Printed appendix: the page the homeowner keeps.
@@ -1606,7 +1629,13 @@
         '<td class="rp-rb-apply">' + escapeHtml(p.applyUrl) + '</td>' +
       '</tr>';
     }).join("");
+    // Incentive programs are organised by measure, so the printed table has to
+    // say which measure it was searched for — a duct-sealing rebate on a page
+    // headed only by an address reads as if it applied to the whole job.
+    var rbJob = rb.jobLabel || (jobType() ? jobType().label : "");
     return '<div class="rp-block rp-rebates"><h2>Grants, credits &amp; rebates for this address</h2>' +
+      (rbJob ? '<p class="rp-permit-note">Searched for: <b>' + escapeHtml(rbJob) + '</b>' +
+        (rb.jobCustom ? ' — ' + escapeHtml(rb.jobCustom) : "") + '</p>' : "") +
       (rb.homeownerSummary ? '<p class="rp-rb-summary">' + escapeHtml(rb.homeownerSummary) + '</p>' : "") +
       '<table class="rp-rb-table">' +
         '<tr><th>Program</th><th>Type</th><th>Up to</th><th>Where to apply</th></tr>' + rows +
@@ -1812,52 +1841,343 @@
     '</div>';
   }
 
-  // ---------- SalesIQ (Pro/Fleet + trial): replacement proposal builder ----------
+  // ---------- Export / ServiceTitan hand-off ----------
   //
-  // Everything a salesperson needs to close a replacement at the kitchen
-  // table, from numbers the calculator already produced: what the customer's
-  // current unit costs to run and whether it is even the right size, three
-  // right-sized replacement options (single-stage / two-stage / variable, at
-  // the exact tonnage Manual S picks for each), their annual operating cost
-  // from the OpCost bin engine, financing per option, and the number that
-  // actually sells — net monthly cost after energy savings.
-  //
-  // Inputs live in state.overrides.sales so they ride along in share links
-  // and the saved-job history without any extra plumbing; a fresh address
-  // starts a fresh proposal (finishRun resets overrides).
+  // See job-export.js for why there is no "connect your ServiceTitan account"
+  // button here: their API needs machine-to-machine secrets that cannot live
+  // in a browser, and handing a third-party app your App Key is the tunneling
+  // pattern ServiceTitan prohibits outright. These three routes are the ones
+  // a contractor can actually use without breaking their own agreement.
 
-  var SALES_OPTION_DEFAULTS = [
-    { key: "good",   label: "Good",   sub: "Single-stage",       systemType: "single",   seer2: 14.3, afue: 0.80, hspf2: 7.5 },
-    { key: "better", label: "Better", sub: "Two-stage",          systemType: "two",      seer2: 16.0, afue: 0.96, hspf2: 8.5 },
-    { key: "best",   label: "Best",   sub: "Variable-capacity",  systemType: "variable", seer2: 18.0, afue: 0.96, hspf2: 9.5 }
+  function exportCtx() {
+    return {
+      geo: state.geo, climate: state.climate, effective: state.effective,
+      result: state.result, energy: state.energyResult, rebates: state.rebates,
+      rooms: state.roomResult, jobType: jobType(), jobCustom: jobTypeCustom()
+    };
+  }
+
+  function exportCard() {
+    if (!state.result) return "";
+    var s = loadSettings();
+    var hook = s.webhookUrl || "";
+    return '' +
+      '<div class="permit-card ex-card" id="exportCard">' +
+        '<div class="hp-head"><span class="ico">' + exportIcon() + '</span>Send this job to your system</div>' +
+        '<p class="hp-text">Pricing and proposals stay in your quoting software. This sends the engineering — loads, tonnage, airflow, design conditions and any incentives found — so it lands on the job instead of being retyped.</p>' +
+        '<div class="ex-btns">' +
+          '<button class="ex-btn primary" id="exCopyText">Copy for ServiceTitan</button>' +
+          '<button class="ex-btn" id="exCopyJson">Copy JSON</button>' +
+          '<button class="ex-btn" id="exDownload">Download .json</button>' +
+          (hook ? '<button class="ex-btn" id="exWebhook">Send to webhook</button>' : "") +
+        '</div>' +
+        '<p class="ex-foot">' + (hook
+          ? 'Webhook configured in Settings. It posts the structured job to your own automation, which is where your ServiceTitan credentials belong.'
+          : 'Paste the first one straight into a ServiceTitan job note, estimate description or task. For a hands-off hand-off, add an automation webhook (Zapier, Make, n8n) under Settings — ServiceTitan\'s API needs server-side credentials, and pasting an App Key into any third-party app is prohibited by their own integration rules.') + '</p>' +
+      '</div>';
+  }
+
+  function exportIcon() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>'; }
+
+  function copyText(text, okMsg) {
+    function fallback() {
+      // Older iOS Safari and any non-secure context land here.
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      var done = false;
+      try { done = document.execCommand("copy"); } catch (e) {}
+      document.body.removeChild(ta);
+      toast(done ? okMsg : "Couldn't copy — select the text manually");
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { toast(okMsg); }, fallback);
+    } else fallback();
+  }
+
+  function wireExport() {
+    var JX = window.JobExport;
+    if (!JX || !$("#exportCard")) return;
+    var copyBtn = $("#exCopyText");
+    if (copyBtn) copyBtn.addEventListener("click", function () {
+      copyText(JX.toText(exportCtx()), "Job summary copied — paste it into ServiceTitan");
+    });
+    var jsonBtn = $("#exCopyJson");
+    if (jsonBtn) jsonBtn.addEventListener("click", function () {
+      copyText(JSON.stringify(JX.toJson(exportCtx()), null, 2), "JSON copied");
+    });
+    var dl = $("#exDownload");
+    if (dl) dl.addEventListener("click", function () {
+      var blob = new Blob([JSON.stringify(JX.toJson(exportCtx()), null, 2)], { type: "application/json" });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url; a.download = JX.fileName(exportCtx());
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      toast("Downloaded");
+    });
+    var hook = $("#exWebhook");
+    if (hook) hook.addEventListener("click", function () {
+      var s = loadSettings();
+      var work = JX.sendWebhook(s.webhookUrl, exportCtx());
+      if (window.Thinking) work = window.Thinking.during("Sending to your automation…", work);
+      work.then(function () { toast("Sent to your webhook"); })
+          .catch(function (e) { toast(e && e.message ? e.message : "Send failed"); });
+    });
+  }
+
+  // ---------- Job type: what the homeowner actually wants installed ----------
+  //
+  // Chosen before the calculation and carried with it, because it changes
+  // three things: whether duct losses apply at all, which Manual S stage
+  // family the sizing uses, and — most of all — which incentive programs
+  // exist for this work. Incentives are organised by measure, so a duct-only
+  // job and a mini-split job share almost no programs.
+  //
+  // Both ways in are supported: tap a chip, or type it. Typing matters on a
+  // phone in a driveway, where scrolling thirty options is slower than typing
+  // "mini split".
+
+  var JOB_KEY = "lmp_job_v1";
+
+  function jobTypeId() {
+    var id = state.jobType;
+    if (id && window.JobTypes && window.JobTypes.get(id)) return id;
+    return window.JobTypes ? window.JobTypes.DEFAULT_ID : "ac-furnace-96";
+  }
+  function jobTypeCustom() { return state.jobCustom || ""; }
+  function jobType() { return window.JobTypes ? window.JobTypes.get(jobTypeId()) : null; }
+
+  // The last job type is remembered on the device: a shop that installs mainly
+  // heat pumps should not re-pick "heat pump" on every single call.
+  function loadLastJobType() {
+    try {
+      var raw = JSON.parse(localStorage.getItem(JOB_KEY));
+      if (raw && raw.id && window.JobTypes && window.JobTypes.get(raw.id)) {
+        state.jobType = raw.id;
+        state.jobCustom = typeof raw.custom === "string" ? raw.custom : "";
+      }
+    } catch (e) {}
+  }
+  function saveLastJobType() {
+    try { localStorage.setItem(JOB_KEY, JSON.stringify({ id: jobTypeId(), custom: jobTypeCustom() })); } catch (e) {}
+  }
+
+  // A short, common set shown as chips. The rest are reachable by typing, so
+  // the driveway case stays one tap without hiding the long tail.
+  var JOB_QUICK = ["ac-furnace-96", "hp-variable", "minisplit-single", "ac-furnace-80", "hp-standard", "duct-replace", "duct-seal", "furnace-only-96", "ac-only"];
+
+  function renderJobPicker() {
+    var JT = window.JobTypes;
+    if (!JT || !$("#jobChips")) return;
+    var cur = jobTypeId();
+    $("#jobChips").innerHTML = JOB_QUICK.map(function (id) {
+      var t = JT.get(id);
+      return t ? '<button type="button" class="job-chip' + (id === cur ? " on" : "") + '" data-job="' + id + '">' + escapeHtml(t.short) + '</button>' : "";
+    }).join("") + '<button type="button" class="job-chip more" id="jobMoreBtn">All job types…</button>';
+
+    var t = JT.get(cur);
+    $("#jobChosen").innerHTML = t
+      ? '<div class="job-chosen"><b>' + escapeHtml(t.label) + '</b><span>' + escapeHtml(t.blurb) + '</span>' +
+        (t.note ? '<span class="job-note">' + escapeHtml(t.note) + '</span>' : "") +
+        (jobTypeCustom() ? '<span class="job-custom">Your note: ' + escapeHtml(jobTypeCustom()) + '</span>' : "") + '</div>'
+      : "";
+  }
+
+  function renderJobSuggest(q) {
+    var JT = window.JobTypes, box = $("#jobSuggest");
+    if (!JT || !box) return;
+    var hits = JT.search(q);
+    if (!hits.length) { box.innerHTML = ""; box.classList.remove("open"); return; }
+    box.innerHTML = hits.map(function (t) {
+      return '<button type="button" class="job-sg" data-job="' + t.id + '"><b>' + escapeHtml(t.label) + '</b><span>' + escapeHtml(t.blurb) + '</span></button>';
+    }).join("");
+    box.classList.add("open");
+  }
+
+  function chooseJob(id, opts) {
+    var JT = window.JobTypes;
+    if (!JT || !JT.get(id)) return;
+    state.jobType = id;
+    // Anything typed that did not resolve to a type is still worth keeping —
+    // it goes to the incentive search verbatim, where "swamp cooler swap" may
+    // be exactly the phrase that finds the program.
+    if (opts && typeof opts.custom === "string") state.jobCustom = opts.custom;
+    saveLastJobType();
+    var box = $("#jobSuggest");
+    if (box) { box.innerHTML = ""; box.classList.remove("open"); }
+    var inp = $("#jobSearch");
+    if (inp) inp.value = "";
+    renderJobPicker();
+    // A job type picked after a calculation changes the answer, so redo it.
+    if (state.result) {
+      thinkThen("Applying the job type…", function () {
+        compute();
+        render();
+      });
+    }
+  }
+
+  function openJobSheet() {
+    var JT = window.JobTypes;
+    if (!JT) return;
+    var cur = jobTypeId();
+    var groups = JT.byCategory().map(function (c) {
+      return '<div class="job-cat">' + escapeHtml(c.label) + '</div>' +
+        c.types.map(function (t) {
+          return '<button type="button" class="job-row' + (t.id === cur ? " on" : "") + '" data-job="' + t.id + '">' +
+            '<b>' + escapeHtml(t.label) + '</b><span>' + escapeHtml(t.blurb) + '</span></button>';
+        }).join("");
+    }).join("");
+    $("#settingsRoot").innerHTML =
+      '<div class="overlay" id="overlay"><div class="sheet job-sheet">' +
+        '<div class="grab"></div>' +
+        '<h3>What is this job?</h3>' +
+        '<p class="sub">This sets the duct assumption, the sizing family, and — most of all — which rebate and grant programs are searched for.</p>' +
+        '<div class="job-list">' + groups + '</div>' +
+        '<label>Anything unusual about it?</label>' +
+        '<input type="text" id="jobCustomIn" value="' + escapeAttr(jobTypeCustom()) + '" placeholder="e.g. replacing a swamp cooler, two systems, crawlspace only" />' +
+        '<p class="sub">Sent word-for-word to the rebate search, which sometimes finds a program the categories miss.</p>' +
+        '<button class="close" id="jobSheetClose">Done</button>' +
+      '</div></div>';
+    var overlay = $("#overlay");
+    function close() {
+      var cin = $("#jobCustomIn");
+      if (cin) { state.jobCustom = cin.value.trim().slice(0, 200); saveLastJobType(); }
+      $("#settingsRoot").innerHTML = "";
+      renderJobPicker();
+    }
+    overlay.addEventListener("click", function (e) { if (e.target === overlay) close(); });
+    $("#jobSheetClose").addEventListener("click", close);
+    overlay.querySelectorAll("[data-job]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var cin = $("#jobCustomIn");
+        var custom = cin ? cin.value.trim().slice(0, 200) : jobTypeCustom();
+        $("#settingsRoot").innerHTML = "";
+        chooseJob(b.getAttribute("data-job"), { custom: custom });
+      });
+    });
+  }
+
+  function wireJobPicker() {
+    var inp = $("#jobSearch");
+    if (inp) {
+      inp.addEventListener("input", function () { renderJobSuggest(inp.value); });
+      inp.addEventListener("keydown", function (e) {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        var JT = window.JobTypes;
+        var hits = JT ? JT.search(inp.value) : [];
+        // Typed something the catalogue doesn't know? Keep the words rather
+        // than discarding them — they still steer the incentive search.
+        if (hits.length) chooseJob(hits[0].id);
+        else if (inp.value.trim()) { chooseJob("other", { custom: inp.value.trim() }); }
+      });
+      inp.addEventListener("blur", function () {
+        setTimeout(function () {
+          var box = $("#jobSuggest");
+          if (box) { box.innerHTML = ""; box.classList.remove("open"); }
+        }, 200);
+      });
+    }
+    var pick = $("#jobPick");
+    if (pick) pick.addEventListener("click", function (e) {
+      var more = e.target.closest("#jobMoreBtn");
+      if (more) { openJobSheet(); return; }
+      var b = e.target.closest("[data-job]");
+      if (b) chooseJob(b.getAttribute("data-job"));
+    });
+    renderJobPicker();
+  }
+
+  // The chosen job, shown with the results so the number on screen is never
+  // read without the job it was calculated for.
+  function jobTypeCard() {
+    var t = jobType();
+    if (!t) return "";
+    return '<div class="job-banner">' +
+      '<span class="job-banner-k">Job</span>' +
+      '<b>' + escapeHtml(t.label) + '</b>' +
+      (t.ducted === false ? '<span class="job-tag">no duct losses</span>' : "") +
+      (t.needsLoad === false ? '<span class="job-tag warn">sized per room, not whole-house</span>' : "") +
+      '<button type="button" class="job-change" id="jobChangeBtn">Change</button>' +
+      '</div>';
+  }
+
+  // Marks the one sizing family the chosen job actually belongs to, so the
+  // printed table reads as an answer with alternates rather than four
+  // equally-weighted options a homeowner has to arbitrate.
+  function recMark(key) {
+    var job = jobType();
+    if (!job) return "";
+    var row = job.systemType || (job.fuel === "heat-pump" || job.fuel === "geothermal" ? "hp" : null);
+    return row === key ? ' <b class="rp-rec-this">&larr; this job</b>' : "";
+  }
+
+  // The job on the printed report. The loads on page one were calculated for a
+  // specific installation, and a report that omits which one invites the sizes
+  // being carried onto a different job entirely.
+  function reportJobLine() {
+    var t = jobType();
+    if (!t) return "";
+    var note = jobTypeCustom();
+    return '<div class="rp-job"><b>Job:</b> ' + escapeHtml(t.label) +
+      (t.ducted === false ? ' · ductless — no duct losses applied' : "") +
+      (note ? ' · ' + escapeHtml(note) : "") + '</div>';
+  }
+
+  // ---------- EnergyIQ (Pro/Fleet + trial): operating cost & right-size check ----------
+  //
+  // This deliberately stops short of being a quoting tool. It carries no
+  // prices, no financing and no proposal: shops already run ServiceTitan or
+  // similar for that, and a second place to type prices is a second place for
+  // them to be wrong. What it does is the part a pricing tool cannot do —
+  // establish, from this home's own load and its own year of weather, what the
+  // existing system costs to run, whether it was ever the right size, and what
+  // each efficiency level would cost instead. That is the engineering case the
+  // quote gets attached to.
+
+  var ENERGY_TIERS = [
+    { key: "good", label: "Standard", sub: "Single-stage", systemType: "single", seer2: 14.3, afue: 0.80, hspf2: 7.5 },
+    { key: "better", label: "High-efficiency", sub: "Two-stage", systemType: "two", seer2: 16.0, afue: 0.96, hspf2: 8.5 },
+    { key: "best", label: "Premium", sub: "Variable-capacity", systemType: "variable", seer2: 18.0, afue: 0.96, hspf2: 9.5 }
   ];
-  var SALES_FUEL_LABEL = { furnace: "Gas furnace + A/C", hp: "Heat pump (all-electric)", dualfuel: "Dual fuel (heat pump + gas furnace)" };
   var EXISTING_HEAT_LABEL = { furnace: "Gas furnace", hp: "Heat pump", resistance: "Electric strips / baseboard", none: "No central heat" };
 
-  function salesDefaults() {
+  // The job type already says what is being installed, so there is no separate
+  // fuel picker to get out of step with it.
+  function energyFuel() {
+    var jt = window.JobTypes && window.JobTypes.get(jobTypeId());
+    if (!jt) return "furnace";
+    if (jt.fuel === "heat-pump" || jt.fuel === "geothermal") return "hp";
+    if (jt.fuel === "dual-fuel") return "dualfuel";
+    if (jt.fuel === "electric-resistance") return "resistance";
+    return "furnace";
+  }
+
+  function energyDefaults() {
     var g = state.geo || {};
     var rates = window.EnergyEngine.ratesForState(g.state);
     return {
       existing: { tons: null, year: null, heatType: "furnace", seer: null, afue: null, hspf: null },
-      fuel: "furnace",
-      options: SALES_OPTION_DEFAULTS.map(function (d) { return { seer2: d.seer2, afue: d.afue, hspf2: d.hspf2, price: null, rebate: null }; }),
-      apr: 9.99, months: 120, down: 0,
       rates: { kwh: rates.kwh, therm: rates.therm, source: rates.national ? "national" : rates.state }
     };
   }
-  function salesState() {
-    if (!state.overrides.sales) state.overrides.sales = salesDefaults();
-    return state.overrides.sales;
+  function energyState() {
+    if (!state.overrides.energy) state.overrides.energy = energyDefaults();
+    return state.overrides.energy;
   }
 
-  // Runs after every compute(). Cheap (30 bins × 4 systems), so it always
-  // runs — the card shows option costs immediately and adds the "vs. your
-  // current system" column the moment the customer's unit is described.
-  function computeSales() {
+  function computeEnergy() {
     var r = state.result, c = state.climate;
     var EE = window.EnergyEngine;
-    if (!r || !c || !EE) { state.salesResult = null; return; }
-    var s = salesState();
+    if (!r || !c || !EE) { state.energyResult = null; return; }
+    var s = energyState();
+    var fuel = energyFuel();
     var bins = c.tempBins || EE.syntheticBins(c.heating99, c.cooling1);
     var binsLive = !!c.tempBins;
     var base = {
@@ -1897,119 +2217,91 @@
       };
     }
 
-    // --- the shop's price book fills anything the rep hasn't typed ---
-    // Precedence is the same everywhere in this app: a number the rep entered
-    // on this job wins, the shop's saved book fills the blanks, and the
-    // generic defaults are the last resort. Filling only blanks means opening
-    // a saved job never overwrites the prices that job was quoted at.
-    var book = window.PriceBook ? window.PriceBook.load() : { entries: [] };
-    var filled = window.PriceBook ? window.PriceBook.fillProposal(book, {
-      fuel: s.fuel,
-      stageByTier: { good: "single", better: "two", best: "variable" },
-      tonsByTier: { good: r.sizing.single, better: r.sizing.two, best: r.sizing.variable }
-    }) : null;
-    var bookUsed = [];
-
-    // --- the three replacement options ---
-    var options = SALES_OPTION_DEFAULTS.map(function (d, i) {
-      var o = s.options[i] || {};
+    var options = ENERGY_TIERS.map(function (d) {
       var tons = r.sizing[d.systemType];
-      var pb = filled ? filled[d.key] : null;
-      if (pb) {
-        if (o.price == null && pb.price != null) { o.price = pb.price; o.fromBook = true; }
-        if (o.rebate == null && pb.rebate > 0) o.rebate = pb.rebate;
-        if (o.seer2 == null && pb.seer2 != null) o.seer2 = pb.seer2;
-        if (o.afue == null && pb.afue != null) o.afue = pb.afue;
-        if (o.hspf2 == null && pb.hspf2 != null) o.hspf2 = pb.hspf2;
-        if (o.fromBook) bookUsed.push({ tier: d.key, name: pb.entry.name, basis: pb.basis, exact: pb.exact, nearestTons: pb.nearestTons, tierMatch: pb.tierMatch });
-      }
-      s.options[i] = o;
       var sys = {
-        coolType: s.fuel === "furnace" ? "ac" : "hp",
-        seer2: o.seer2 > 0 ? o.seer2 : d.seer2, tons: tons, systemType: d.systemType,
-        heatType: s.fuel, afue: o.afue > 0 ? o.afue : d.afue, hspf2: o.hspf2 > 0 ? o.hspf2 : d.hspf2,
+        coolType: fuel === "furnace" || fuel === "resistance" ? "ac" : "hp",
+        seer2: d.seer2, tons: tons, systemType: d.systemType,
+        heatType: fuel, afue: d.afue, hspf2: d.hspf2,
         furnaceOutputBtu: r.equipment.furnaceOutput
       };
       var energy = EE.annualEnergy(Object.assign({}, base, { system: sys }));
-      var price = o.price > 0 ? o.price : null;
-      var rebate = o.rebate > 0 ? o.rebate : 0;
-      var financed = price != null ? Math.max(0, price - rebate - (s.down || 0)) : null;
-      var payment = financed != null ? EE.monthlyPayment(financed, s.apr, s.months) : null;
-      var savings = existing ? existing.energy.totalCost - energy.totalCost : null;
       return {
         key: d.key, label: d.label, sub: d.sub, systemType: d.systemType, tons: tons,
-        seer2: sys.seer2, afue: sys.afue, hspf2: sys.hspf2, price: price, rebate: rebate,
-        energy: energy, payment: payment,
-        savingsPerYear: savings,
-        netMonthly: (payment != null && savings != null) ? payment - savings / 12 : null,
-        tenYearCost: price != null ? Math.round(price - rebate + 10 * energy.totalCost) : null
+        seer2: d.seer2, afue: d.afue, hspf2: d.hspf2, energy: energy,
+        savingsPerYear: existing ? existing.energy.totalCost - energy.totalCost : null
       };
     });
-    // Payback of the upgrades against "Good", when prices are in.
-    options.forEach(function (o, i) {
-      var g = options[0];
-      if (i === 0 || o.price == null || g.price == null) { o.paybackYears = null; return; }
-      var dPrice = (o.price - o.rebate) - (g.price - g.rebate);
-      var dSave = g.energy.totalCost - o.energy.totalCost;
-      o.paybackYears = (dPrice > 0 && dSave > 0) ? Math.round(dPrice / dSave * 10) / 10 : (dPrice <= 0 ? 0 : null);
-    });
 
-    state.salesResult = { existing: existing, options: options, fuel: s.fuel, binsLive: binsLive, rates: s.rates, apr: s.apr, months: s.months, down: s.down || 0,
-      bookUsed: bookUsed, bookSize: book.entries.length };
+    /*
+     * Which sides of the system this job actually installs. A furnace-only job
+     * should not have its tiers labelled by SEER2. And a job that installs no
+     * heating or cooling equipment at all — ducts, insulation, a thermostat —
+     * still gets the tiers, because they are the yardstick that justifies the
+     * work, but they must not read as options being quoted.
+     */
+    var jt = jobType();
+    var doesCooling = !jt || jt.cooling !== false;
+    var doesHeating = !jt || jt.heating !== false;
+    state.energyResult = {
+      existing: existing, options: options, fuel: fuel, binsLive: binsLive, rates: s.rates,
+      doesCooling: doesCooling, doesHeating: doesHeating,
+      installsEquipment: doesCooling || doesHeating,
+      jobLabel: jt ? jt.label : ""
+    };
   }
 
-  // Negative money reads as "−$23", never "$-23" — this shows up whenever
-  // energy savings exceed the monthly payment, which is the single best
-  // number on the page and must not look like a typo.
   function money(n) {
     var v = Math.round(n || 0);
-    return (v < 0 ? "\u2212$" : "$") + Math.abs(v).toLocaleString("en-US");
+    return (v < 0 ? "−$" : "$") + Math.abs(v).toLocaleString("en-US");
   }
-  function moneyOrDash(n) { return n == null ? "—" : money(n); }
-  function salesIcon() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>'; }
+  function energyIcon() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h8l-1 8 10-12h-8z"/></svg>'; }
 
-  function salesCard() {
-    var g = state.geo || {};
+  /*
+   * The efficiency figure a tier is actually bought on. A furnace-only job is
+   * sold on AFUE, a heat pump on HSPF2, a cooling change-out on SEER2 — a
+   * SEER2 number on a furnace-only quote is noise the rep has to explain away.
+   */
+  function effLabel(er, o) {
+    // A job installing neither side is being measured against a whole system,
+    // so it gets both metrics rather than an arbitrary one.
+    var both = !er.doesCooling && !er.doesHeating;
+    var parts = [];
+    if (er.doesCooling || both) parts.push(o.seer2 + " SEER2");
+    if (er.doesHeating || both) {
+      if (er.fuel === "hp" || er.fuel === "dualfuel") parts.push(o.hspf2 + " HSPF2");
+      if (er.fuel === "furnace" || er.fuel === "dualfuel") parts.push(Math.round(o.afue * 100) + "% AFUE");
+    }
+    return parts.length ? parts.join(" · ") : o.seer2 + " SEER2";
+  }
+
+  function energyCard() {
     if (planTier() < 2) {
       var cta = planTier() === 0
-        ? '<a class="permit-cta" href="auth.html#signup">Start free trial — unlock SalesIQ</a>'
-        : '<a class="permit-cta" href="index.html#pricing">Upgrade to Pro — unlock SalesIQ</a>';
+        ? '<a class="permit-cta" href="auth.html#signup">Start free trial — unlock EnergyIQ</a>'
+        : '<a class="permit-cta" href="index.html#pricing">Upgrade to Pro — unlock EnergyIQ</a>';
       return '' +
         '<div class="permit-card locked">' +
-          '<div class="hp-head"><span class="ico gold">' + lockIcon() + '</span>SalesIQ™ — replacement proposal<span class="permit-badge">PRO</span></div>' +
-          '<p class="hp-text">Show the customer what their current unit costs to run, whether it\'s even the right size, and three right-sized replacement options with annual operating cost, financing, and the net monthly cost after energy savings — built from this home\'s own load and a year of its own weather.</p>' +
+          '<div class="hp-head"><span class="ico gold">' + lockIcon() + '</span>EnergyIQ™ — running cost &amp; right-size<span class="permit-badge">PRO</span></div>' +
+          '<p class="hp-text">Show what the customer\'s current unit costs to run, whether it was ever the right size for this house, and what each efficiency level would cost instead — from this home\'s own load and its own year of weather.</p>' +
           '<div class="permit-teaser"><div class="tz-row"></div><div class="tz-row w70"></div><div class="tz-row w85"></div><div class="tz-row w60"></div></div>' +
           cta +
         '</div>';
     }
-    var s = salesState(), sr = state.salesResult, r = state.result;
-    if (!sr) return "";
+    var s = energyState(), er = state.energyResult, r = state.result;
+    if (!er) return "";
     var ex = s.existing;
     function num(id, val, attrs, ph) {
-      return '<input type="number" id="' + id + '" ' + (attrs || "") + ' value="' + (val != null ? val : "") + '"' + (ph ? ' placeholder="' + escapeHtml(ph) + '"' : "") + ' />';
+      return '<input type="number" id="' + id + '" ' + (attrs || "") + ' value="' + (val != null ? val : "") + '"' + (ph ? ' placeholder="' + escapeAttr(ph) + '"' : "") + ' />';
     }
     function sel(id, val, opts) {
-      return '<select id="' + id + '">' + opts.map(function (o) { return '<option value="' + o[0] + '"' + (String(o[0]) === String(val) ? " selected" : "") + '>' + o[1] + '</option>'; }).join("") + '</select>';
+      return '<select id="' + id + '">' + opts.map(function (o) { return '<option value="' + escapeAttr(String(o[0])) + '"' + (String(o[0]) === String(val) ? " selected" : "") + '>' + escapeHtml(o[1]) + '</option>'; }).join("") + '</select>';
     }
     var tonsOpts = [["", "Not sure"]].concat([1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 6].map(function (t) { return [t, t + " ton"]; }));
-    var showAfue = s.fuel !== "hp", showHspf = s.fuel !== "furnace";
 
-    var optionCols = SALES_OPTION_DEFAULTS.map(function (d, i) {
-      var o = s.options[i] || {};
-      return '<div class="sq-opt-col">' +
-        '<div class="sq-opt-name">' + d.label + '<span>' + d.sub + ' · ' + r.sizing[d.systemType] + ' ton</span></div>' +
-        '<label>SEER2</label>' + num("sqSeer" + i, o.seer2 != null ? o.seer2 : d.seer2, 'min="10" max="30" step="0.1"') +
-        (showAfue ? '<label>AFUE</label>' + num("sqAfue" + i, o.afue != null ? o.afue : d.afue, 'min="0.6" max="0.99" step="0.01"') : "") +
-        (showHspf ? '<label>HSPF2</label>' + num("sqHspf" + i, o.hspf2 != null ? o.hspf2 : d.hspf2, 'min="5" max="14" step="0.1"') : "") +
-        '<label>Installed price</label>' + num("sqPrice" + i, o.price, 'min="0" step="100"', "your quote") +
-        '<label>Rebates / credits</label>' + num("sqRebate" + i, o.rebate, 'min="0" step="50"', "utility, mfr, tax") +
-      '</div>';
-    }).join("");
-
-    // ----- results -----
     var exHtml = "";
-    if (sr.existing) {
-      var e2 = sr.existing, rs = e2.rightSize;
+    if (er.existing) {
+      var e2 = er.existing, rs = e2.rightSize;
       var verdictCls = rs ? (rs.verdict === "right-sized" ? "ok" : rs.verdict === "undersized" ? "warn" : "bad") : "";
       exHtml =
         '<div class="sq-existing">' +
@@ -2025,220 +2317,162 @@
         '</div>';
     }
 
-    var haveExisting = !!sr.existing, havePrices = sr.options.some(function (o) { return o.price != null; });
-    var resultCols = sr.options.map(function (o) {
-      var headline = o.netMonthly != null ? money(o.netMonthly) + '<em>/mo net</em>'
-        : o.payment != null ? money(o.payment) + '<em>/mo</em>'
-        : money(o.energy.totalCost) + '<em>/yr to run</em>';
+    var haveExisting = !!er.existing;
+    var resultCols = er.options.map(function (o) {
       return '<div class="sq-res-col ' + o.key + '">' +
         '<div class="sq-res-name">' + o.label + '<span>' + o.sub + ' · ' + o.tons + ' ton</span></div>' +
-        '<div class="sq-res-headline">' + headline + '</div>' +
-        '<div class="eq-row"><span>Runs for</span><b>' + money(o.energy.totalCost) + '/yr</b></div>' +
+        '<div class="sq-res-headline">' + money(o.energy.totalCost) + '<em>/yr</em></div>' +
+        '<div class="eq-row"><span>Efficiency</span><b>' + effLabel(er, o) + '</b></div>' +
         (haveExisting ? '<div class="eq-row"><span>vs. current</span><b class="' + (o.savingsPerYear > 0 ? "good" : "bad") + '">' + (o.savingsPerYear >= 0 ? "saves " : "costs ") + money(Math.abs(o.savingsPerYear)) + '/yr</b></div>' : "") +
-        (o.payment != null ? '<div class="eq-row"><span>Payment</span><b>' + money(o.payment) + '/mo</b></div>' : "") +
-        (o.netMonthly != null ? '<div class="eq-row"><span>After savings</span><b>' + money(o.netMonthly) + '/mo</b></div>' : "") +
-        (o.tenYearCost != null ? '<div class="eq-row"><span>10-yr cost to own</span><b>' + money(o.tenYearCost) + '</b></div>' : "") +
-        (o.paybackYears != null ? '<div class="eq-row"><span>Pays back vs. Good</span><b>' + (o.paybackYears === 0 ? "immediately" : o.paybackYears + " yrs") + '</b></div>' : "") +
+        '<div class="eq-row"><span>Cooling</span><b>' + money(o.energy.cooling.cost) + '/yr</b></div>' +
+        '<div class="eq-row"><span>Heating</span><b>' + money(o.energy.heating.cost) + '/yr</b></div>' +
         (o.energy.heating.switchoverF != null ? '<div class="eq-row"><span>Furnace takes over</span><b>below ' + o.energy.heating.switchoverF + '°F</b></div>' : "") +
-        (s.fuel === "hp" && o.energy.heating.auxKwh > 0 ? '<div class="eq-row"><span>Backup strips</span><b>' + fmt(o.energy.heating.auxKwh) + ' kWh/yr</b></div>' : "") +
+        (er.fuel === "hp" && o.energy.heating.auxKwh > 0 ? '<div class="eq-row"><span>Backup strips</span><b>' + fmt(o.energy.heating.auxKwh) + ' kWh/yr</b></div>' : "") +
       '</div>';
     }).join("");
 
-    var talkTrack = salesTalkTrack(sr);
-    var ratesNote = sr.rates.source === "national"
+    var noEquipNote = er.installsEquipment === false
+      ? '<p class="sq-hint sq-yardstick">' + escapeHtml(er.jobLabel) + ' installs no equipment, so the three levels below are a yardstick for this house, not options you are quoting. The number that matters here is the current system\'s running cost above.</p>'
+      : "";
+
+    var talk = energyTalkTrack(er);
+    var ratesNote = er.rates.source === "national"
       ? "Rates are a national average — enter the customer's actual bill rates."
-      : "Rates start from a typical " + sr.rates.source + " average — enter the customer's actual bill rates for a tighter number.";
+      : "Rates start from a typical " + er.rates.source + " average — enter the customer's actual bill rates for a tighter number.";
 
     return '' +
-      '<div class="permit-card sq-card" id="salesCard">' +
-        '<div class="hp-head"><span class="ico gold">' + salesIcon() + '</span>SalesIQ™ — replacement proposal<span class="permit-badge on">PRO</span></div>' +
-        '<p class="hp-text">Operating costs come from this home\'s calculated load run through ' + (sr.binsLive ? 'a full year of on-site hourly weather' : 'a temperature profile estimated from the design conditions') + ' (bin method), with each unit\'s efficiency evaluated at the outdoor temperature it actually runs at.</p>' +
+      '<div class="permit-card sq-card" id="energyCard">' +
+        '<div class="hp-head"><span class="ico gold">' + energyIcon() + '</span>EnergyIQ™ — running cost &amp; right-size<span class="permit-badge on">PRO</span></div>' +
+        '<p class="hp-text">Running costs come from this home\'s calculated load run through ' + (er.binsLive ? 'a full year of on-site hourly weather' : 'a temperature profile estimated from the design conditions') + ' (bin method), with each unit\'s efficiency evaluated at the outdoor temperature it actually runs at. No prices here by design — this is the engineering case your quote attaches to.</p>' +
 
         '<div class="adjust sq-form">' +
           '<div class="sq-section">Customer\'s current system</div>' +
           '<div class="adjust-row">' +
-            '<div><label>Cooling size</label>' + sel("sqExTons", ex.tons, tonsOpts) + '</div>' +
-            '<div><label>Year installed</label>' + num("sqExYear", ex.year, 'min="1970" max="2030" step="1"', "e.g. 2008") + '</div>' +
+            '<div><label>Cooling size</label>' + sel("eqExTons", ex.tons, tonsOpts) + '</div>' +
+            '<div><label>Year installed</label>' + num("eqExYear", ex.year, 'min="1970" max="2030" step="1"', "e.g. 2008") + '</div>' +
           '</div>' +
           '<div class="adjust-row">' +
-            '<div><label>Heating</label>' + sel("sqExHeat", ex.heatType, Object.keys(EXISTING_HEAT_LABEL).map(function (k) { return [k, EXISTING_HEAT_LABEL[k]]; })) + '</div>' +
-            '<div><label>SEER (nameplate, optional)</label>' + num("sqExSeer", ex.seer, 'min="6" max="30" step="0.5"', "blank = typical for its age") + '</div>' +
+            '<div><label>Heating</label>' + sel("eqExHeat", ex.heatType, Object.keys(EXISTING_HEAT_LABEL).map(function (k) { return [k, EXISTING_HEAT_LABEL[k]]; })) + '</div>' +
+            '<div><label>SEER (nameplate, optional)</label>' + num("eqExSeer", ex.seer, 'min="6" max="30" step="0.5"', "blank = typical for its age") + '</div>' +
           '</div>' +
           '<div class="adjust-row">' +
-            '<div><label>Furnace AFUE (optional)</label>' + num("sqExAfue", ex.afue, 'min="0.5" max="0.99" step="0.01"', "blank = 80%") + '</div>' +
-            '<div><label>Heat pump HSPF (optional)</label>' + num("sqExHspf", ex.hspf, 'min="5" max="14" step="0.1"', "blank = typical") + '</div>' +
+            '<div><label>Furnace AFUE (optional)</label>' + num("eqExAfue", ex.afue, 'min="0.5" max="0.99" step="0.01"', "blank = 80%") + '</div>' +
+            '<div><label>Heat pump HSPF (optional)</label>' + num("eqExHspf", ex.hspf, 'min="5" max="14" step="0.1"', "blank = typical") + '</div>' +
           '</div>' +
 
           '<div class="sq-section">Utility rates <span class="sq-hint">' + escapeHtml(ratesNote) + '</span></div>' +
           '<div class="adjust-row">' +
-            '<div><label>Electricity ($/kWh)</label>' + num("sqKwh", Math.round(s.rates.kwh * 1000) / 1000, 'min="0.03" max="1" step="0.001"') + '</div>' +
-            '<div><label>Natural gas ($/therm)</label>' + num("sqTherm", Math.round(s.rates.therm * 100) / 100, 'min="0.3" max="10" step="0.01"') + '</div>' +
+            '<div><label>Electricity ($/kWh)</label>' + num("eqKwh", Math.round(s.rates.kwh * 1000) / 1000, 'min="0.03" max="1" step="0.001"') + '</div>' +
+            '<div><label>Natural gas ($/therm)</label>' + num("eqTherm", Math.round(s.rates.therm * 100) / 100, 'min="0.3" max="10" step="0.01"') + '</div>' +
           '</div>' +
-
-          '<div class="sq-section">Replacement options</div>' +
-          '<label>System type for all three options</label>' +
-          sel("sqFuel", s.fuel, Object.keys(SALES_FUEL_LABEL).map(function (k) { return [k, SALES_FUEL_LABEL[k]]; })) +
-          '<div class="sq-opt-grid">' + optionCols + '</div>' +
-
-          '<div class="sq-section">Financing</div>' +
-          '<div class="sq-fin-row">' +
-            '<div><label>APR %</label>' + num("sqApr", s.apr, 'min="0" max="40" step="0.01"') + '</div>' +
-            '<div><label>Term (months)</label>' + num("sqMonths", s.months, 'min="6" max="240" step="6"') + '</div>' +
-            '<div><label>Down payment</label>' + num("sqDown", s.down || null, 'min="0" step="100"', "0") + '</div>' +
-          '</div>' +
-          '<button class="recalc" id="salesBuildBtn">Build proposal</button>' +
+          '<button class="recalc" id="energyRunBtn">Update running costs</button>' +
         '</div>' +
 
-        '<div class="sq-results" id="salesResults">' +
-          priceBookNote(sr) +
+        '<div class="sq-results" id="energyResults">' +
           exHtml +
+          noEquipNote +
           '<div class="sq-res-grid">' + resultCols + '</div>' +
-          (talkTrack ? '<div class="sq-talk"><b>Talk track</b>' + talkTrack + '</div>' : "") +
+          (talk ? '<div class="sq-talk"><b>Talk track</b>' + talk + '</div>' : "") +
           '<p class="sq-foot">' + (haveExisting ? "" : "Add the customer's current unit above to see what they're paying now and whether it's the right size. ") +
-            (havePrices ? "" : "Enter your installed prices to see monthly payments, net monthly cost after savings, and 10-year cost of ownership. ") +
-            'Operating costs are an engineering estimate for comparing options on this house at the rates above — not a bill guarantee. Efficiency assumptions: ' + (s.fuel === "furnace" ? "A/C SEER2 with a furnace at the AFUE shown" : s.fuel === "hp" ? "heat pump SEER2/HSPF2 with electric backup below its balance point" : "heat pump above the switchover temperature, gas furnace below it") + '.</p>' +
+            'Running costs are an engineering estimate for comparing options on this house at the rates above — not a bill guarantee. Pricing, financing and the proposal itself belong in your quoting software; this page is the load and energy case behind it.</p>' +
         '</div>' +
       '</div>';
   }
 
-  // Where the prices on this proposal came from. A rep about to say a number
-  // out loud should know whether it is their book's, and whether the book had
-  // to substitute a neighbouring size or tier to produce it.
-  function priceBookNote(sr) {
-    if (!sr.bookUsed || !sr.bookUsed.length) {
-      if (!sr.bookSize) {
-        return '<p class="pb-note">Prices below are blank until you enter them. Save your equipment once under Settings, in the price book, and every future proposal fills itself in at the size the house actually needs.</p>';
-      }
-      return '';
-    }
-    var parts = sr.bookUsed.map(function (u) {
-      var caveats = [];
-      if (!u.exact && u.nearestTons) caveats.push("priced at your nearest stocked size, " + u.nearestTons + " ton");
-      if (!u.tierMatch) caveats.push("nothing in that tier, so this is your closest line");
-      return "<b>" + escapeHtml(u.name) + "</b>" + (caveats.length ? " (" + escapeHtml(caveats.join("; ")) + ")" : "");
-    });
-    var anyCaveat = sr.bookUsed.some(function (u) { return !u.exact || !u.tierMatch; });
-    return '<p class="pb-note' + (anyCaveat ? ' warn' : '') + '">Filled from your price book: ' + parts.join(", ") + '. Edit any figure below to override it for this job.</p>';
-  }
-
-  // Plain-English sentences the salesperson can read out, generated only
-  // from what is actually true of this comparison — no line is emitted
-  // unless the numbers back it.
-  function salesTalkTrack(sr) {
+  // Plain-English sentences, each emitted only when the numbers back it —
+  // including the ones that cut against an upsell, because a rep caught
+  // overstating loses the job.
+  function energyTalkTrack(er) {
     var lines = [];
-    var ex = sr.existing, opts = sr.options;
+    var ex = er.existing, opts = er.options;
     if (ex) {
       var rs = ex.rightSize;
       if (rs && rs.verdict !== "right-sized") {
         lines.push(rs.verdict === "undersized"
-          ? "Your current " + ex.tons + "-ton unit is undersized for this house — it isn't a maintenance problem, it's a capacity problem, and a bigger unit of the same efficiency would fix comfort but not the bill."
+          ? "Your current " + ex.tons + "-ton unit is undersized for this house — that isn't a maintenance problem, it's a capacity problem, and a bigger unit of the same efficiency would fix comfort but not the bill."
           : "Your current " + ex.tons + "-ton unit is " + rs.pct + "% of what this house actually needs. Oversized systems cool the thermostat fast and shut off before they dry the air, which is why the house can feel cold and sticky at the same time — and short-cycling like that is hard on compressors.");
       }
       var best = opts.reduce(function (a, b) { return b.energy.totalCost < a.energy.totalCost ? b : a; });
       if (best.savingsPerYear > 100) {
-        lines.push("You're spending about " + money(ex.energy.totalCost) + " a year to heat and cool this house now. The " + best.label + " option runs it for about " + money(best.energy.totalCost) + " — roughly " + money(best.savingsPerYear) + " a year back in your pocket, at today's rates.");
+        lines.push("You're spending about " + money(ex.energy.totalCost) + " a year to heat and cool this house now. The " + best.label.toLowerCase() + " option runs it for about " + money(best.energy.totalCost) + " — roughly " + money(best.savingsPerYear) + " a year back in your pocket, at today's rates.");
       }
       if (ex.lifeNote && ex.age != null && ex.age >= 12) lines.push(ex.lifeNote + " Replacing on your schedule instead of the unit's means you choose the price and the week.");
     }
-    var withNet = opts.filter(function (o) { return o.netMonthly != null; });
-    if (withNet.length >= 2) {
-      var cheapest = withNet.reduce(function (a, b) { return b.netMonthly < a.netMonthly ? b : a; });
-      var good = opts[0];
-      if (cheapest.key !== "good" && good.netMonthly != null) {
-        lines.push("On a monthly basis the " + cheapest.label + " option is actually the cheapest to own: after energy savings it nets out at " + money(cheapest.netMonthly) + " a month versus " + money(good.netMonthly) + " for Good, because the extra efficiency pays part of its own note.");
-      }
-    }
-    var ten = opts.filter(function (o) { return o.tenYearCost != null; });
-    if (ten.length >= 2) {
-      var lowTen = ten.reduce(function (a, b) { return b.tenYearCost < a.tenYearCost ? b : a; });
-      var highTen = ten.reduce(function (a, b) { return b.tenYearCost > a.tenYearCost ? b : a; });
-      if (lowTen.key !== highTen.key && highTen.tenYearCost - lowTen.tenYearCost > 500) {
-        lines.push("Over ten years, counting energy, " + lowTen.label + " costs " + money(highTen.tenYearCost - lowTen.tenYearCost) + " less to own than " + highTen.label + ".");
-      }
-    }
-    if (sr.fuel === "hp") {
+    if (er.fuel === "hp") {
       var strips = opts.filter(function (o) { return o.energy.heating.auxKwh > 0.25 * o.energy.heating.kwh; });
       if (strips.length === opts.length) lines.push("In this climate an all-electric heat pump sized for cooling leans heavily on backup strips in winter — worth pricing the dual-fuel version alongside it.");
     }
     return lines.length ? lines.map(function (l) { return '<p>' + escapeHtml(l) + '</p>'; }).join("") : "";
   }
 
-  function wireSales() {
-    var btn = $("#salesBuildBtn");
-    if (!btn) return;
-    var s = salesState();
+  /*
+   * Reads the current-system and rate fields into state.
+   *
+   * This runs on every edit, not only when the button is pressed, and that
+   * matters: the whole results page re-renders whenever anything else
+   * finishes — a photo analysis, a rebate search, a job-type change — and
+   * these fields are rebuilt from state each time. Reading them only on the
+   * button press meant a rep could type the customer's unit in, have a
+   * background job land, and watch the entries silently disappear.
+   */
+  function readEnergyInputs() {
+    var s = energyState();
     function numVal(id) { var el = $("#" + id); if (!el) return null; var v = parseFloat(el.value); return isFinite(v) ? v : null; }
-    function readInputs() {
-      var tonsEl = $("#sqExTons");
-      s.existing.tons = tonsEl && tonsEl.value ? parseFloat(tonsEl.value) : null;
-      var y = numVal("sqExYear"); s.existing.year = (y >= 1900 && y <= 2100) ? Math.round(y) : null;
-      var heatEl = $("#sqExHeat"); s.existing.heatType = heatEl ? heatEl.value : "furnace";
-      s.existing.seer = numVal("sqExSeer"); s.existing.afue = numVal("sqExAfue"); s.existing.hspf = numVal("sqExHspf");
-      var kwh = numVal("sqKwh"), therm = numVal("sqTherm");
-      if (kwh > 0) s.rates.kwh = kwh;
-      if (therm > 0) s.rates.therm = therm;
-      var fuelEl = $("#sqFuel"); s.fuel = fuelEl ? fuelEl.value : s.fuel;
-      SALES_OPTION_DEFAULTS.forEach(function (d, i) {
-        s.options[i] = s.options[i] || {};
-        var v;
-        v = numVal("sqSeer" + i); if (v != null) s.options[i].seer2 = v;
-        v = numVal("sqAfue" + i); if (v != null) s.options[i].afue = v;
-        v = numVal("sqHspf" + i); if (v != null) s.options[i].hspf2 = v;
-        s.options[i].price = numVal("sqPrice" + i);
-        s.options[i].rebate = numVal("sqRebate" + i);
-      });
-      var apr = numVal("sqApr"); if (apr != null && apr >= 0) s.apr = apr;
-      var months = numVal("sqMonths"); if (months >= 1) s.months = Math.round(months);
-      var down = numVal("sqDown"); s.down = down != null && down >= 0 ? down : 0;
+    var tonsEl = $("#eqExTons");
+    if (tonsEl) s.existing.tons = tonsEl.value ? parseFloat(tonsEl.value) : null;
+    if ($("#eqExYear")) { var y = numVal("eqExYear"); s.existing.year = (y >= 1900 && y <= 2100) ? Math.round(y) : null; }
+    var heatEl = $("#eqExHeat");
+    if (heatEl) s.existing.heatType = heatEl.value;
+    if ($("#eqExSeer")) s.existing.seer = numVal("eqExSeer");
+    if ($("#eqExAfue")) s.existing.afue = numVal("eqExAfue");
+    if ($("#eqExHspf")) s.existing.hspf = numVal("eqExHspf");
+    var kwh = numVal("eqKwh"), therm = numVal("eqTherm");
+    if (kwh > 0) s.rates.kwh = kwh;
+    if (therm > 0) s.rates.therm = therm;
+    return s;
+  }
+
+  function wireEnergy() {
+    var btn = $("#energyRunBtn");
+    if (!btn) return;
+    var form = btn.closest(".sq-form");
+    if (form) {
+      // change covers the selects and a committed number; input covers typing,
+      // so a re-render mid-keystroke keeps what is already there.
+      form.addEventListener("change", readEnergyInputs);
+      form.addEventListener("input", readEnergyInputs);
     }
     btn.addEventListener("click", function () {
-      readInputs();
-      thinkThen("Pricing the options…", function () {
-        computeSales();
+      readEnergyInputs();
+      thinkThen("Working out running costs…", function () {
+        computeEnergy();
         render();
-        var card = $("#salesResults");
+        var card = $("#energyResults");
         if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
       });
     });
-    // Switching fuel changes which efficiency fields make sense — rebuild the
-    // option columns straight away rather than waiting for the button.
-    var fuelEl = $("#sqFuel");
-    if (fuelEl) fuelEl.addEventListener("change", function () {
-      readInputs();
-      computeSales();
-      render();
-      var card = $("#salesCard");
-      if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
   }
 
-  // Printed proposal page for the homeowner — only when the salesperson has
-  // actually built one (an existing system or at least one price entered).
-  function reportProposal() {
-    var sr = state.salesResult;
-    if (!sr || planTier() < 2) return "";
-    var s = salesState();
-    var built = !!sr.existing || sr.options.some(function (o) { return o.price != null; });
-    if (!built) return "";
-    var head = '<tr><th></th>' + sr.options.map(function (o) { return '<th>' + o.label + '<br/><small>' + o.sub + ' · ' + o.tons + ' ton</small></th>'; }).join("") + '</tr>';
-    function row(label, fn) { return '<tr><td>' + label + '</td>' + sr.options.map(function (o) { return '<td>' + fn(o) + '</td>'; }).join("") + '</tr>'; }
-    var eff = row("Efficiency", function (o) {
-      return o.seer2 + " SEER2" + (sr.fuel !== "hp" ? " · " + Math.round(o.afue * 100) + "% AFUE" : "") + (sr.fuel !== "furnace" ? " · " + o.hspf2 + " HSPF2" : "");
-    });
-    return '<div class="rp-block rp-proposal"><h2>Replacement proposal — ' + escapeHtml(SALES_FUEL_LABEL[sr.fuel]) + '</h2>' +
-      (sr.existing ? '<p class="rp-permit-note"><b>Current system:</b> ' + sr.existing.tons + '-ton ' + (sr.existing.heatType === "hp" ? "heat pump" : "A/C") + (sr.existing.year ? " installed " + sr.existing.year : "") +
-        ', ~' + sr.existing.seer + ' SEER · estimated ' + money(sr.existing.energy.totalCost) + '/yr to run' +
-        (sr.existing.rightSize ? ' · ' + sr.existing.rightSize.pct + '% of calculated load (' + sr.existing.rightSize.verdict + ')' : "") + '</p>' : "") +
-      '<table class="rp-prop-table">' + head + eff +
-        row("Estimated annual operating cost", function (o) { return money(o.energy.totalCost); }) +
-        (sr.existing ? row("Annual savings vs. current", function (o) { return (o.savingsPerYear >= 0 ? "" : "−") + money(Math.abs(o.savingsPerYear)); }) : "") +
-        row("Installed price", function (o) { return moneyOrDash(o.price); }) +
-        (sr.options.some(function (o) { return o.rebate > 0; }) ? row("Rebates / credits", function (o) { return o.rebate > 0 ? "−" + money(o.rebate) : "—"; }) : "") +
-        (sr.options.some(function (o) { return o.payment != null; }) ? row("Monthly payment (" + sr.apr + "% · " + sr.months + " mo" + (sr.down > 0 ? " · " + money(sr.down) + " down" : "") + ")", function (o) { return o.payment != null ? money(o.payment) + "/mo" : "—"; }) : "") +
-        (sr.options.some(function (o) { return o.netMonthly != null; }) ? row("Net monthly after energy savings", function (o) { return o.netMonthly != null ? money(o.netMonthly) + "/mo" : "—"; }) : "") +
-        (sr.options.some(function (o) { return o.tenYearCost != null; }) ? row("10-year cost of ownership", function (o) { return moneyOrDash(o.tenYearCost); }) : "") +
+  // Printed running-cost block. Still no prices — the quote travels separately.
+  function reportEnergy() {
+    var er = state.energyResult;
+    if (!er || planTier() < 2) return "";
+    if (!er.existing) return "";
+    var head = '<tr><th></th>' + er.options.map(function (o) { return '<th>' + o.label + '<br/><small>' + o.sub + ' · ' + o.tons + ' ton</small></th>'; }).join("") + '</tr>';
+    function row(label, fn) { return '<tr><td>' + label + '</td>' + er.options.map(function (o) { return '<td>' + fn(o) + '</td>'; }).join("") + '</tr>'; }
+    return '<div class="rp-block rp-proposal"><h2>Running cost by efficiency level</h2>' +
+      (er.installsEquipment === false
+        ? '<p class="rp-permit-note">This job installs no equipment, so the levels below are a yardstick for what the house would cost to heat and cool with each — not options being quoted.</p>'
+        : "") +
+      '<p class="rp-permit-note"><b>Current system:</b> ' + er.existing.tons + '-ton ' + (er.existing.heatType === "hp" ? "heat pump" : "A/C") + (er.existing.year ? " installed " + er.existing.year : "") +
+        ', ~' + er.existing.seer + ' SEER · estimated ' + money(er.existing.energy.totalCost) + '/yr to run' +
+        (er.existing.rightSize ? ' · ' + er.existing.rightSize.pct + '% of calculated load (' + er.existing.rightSize.verdict + ')' : "") + '</p>' +
+      '<table class="rp-prop-table">' + head +
+        row("Efficiency", function (o) { return effLabel(er, o); }) +
+        row("Estimated annual running cost", function (o) { return money(o.energy.totalCost); }) +
+        row("Saving vs. current system", function (o) { return (o.savingsPerYear >= 0 ? "" : "−") + money(Math.abs(o.savingsPerYear)) + "/yr"; }) +
       '</table>' +
-      '<p class="rp-disc" style="margin-top:6px">Operating costs are an engineering estimate from this home\'s calculated load and ' + (sr.binsLive ? 'a year of on-site hourly weather' : 'a temperature profile estimated from local design conditions') + ' at $' + s.rates.kwh.toFixed(3) + '/kWh and $' + s.rates.therm.toFixed(2) + '/therm, for comparing options against each other. Actual bills depend on thermostat settings, occupancy, duct condition and future utility rates. Financing figures are illustrative; final terms are set by the lender.</p>' +
+      '<p class="rp-disc" style="margin-top:6px">Running costs are an engineering estimate from this home\'s calculated load and ' + (er.binsLive ? 'a year of on-site hourly weather' : 'a temperature profile estimated from local design conditions') + ' at $' + er.rates.kwh.toFixed(3) + '/kWh and $' + er.rates.therm.toFixed(2) + '/therm, for comparing options against each other. Actual bills depend on thermostat settings, occupancy, duct condition and future utility rates. Equipment pricing is quoted separately.</p>' +
     '</div>';
   }
 
@@ -2368,16 +2602,17 @@
         '</header>' +
         '<h1 class="rp-title">Residential Load Calculation</h1>' +
         '<div class="rp-addr">' + escapeHtml(g.label) + '</div>' +
+        reportJobLine() +
         '<div class="rp-results">' +
           '<div class="rp-res heat"><span>Heating load</span><b>' + fmt(r.heating.total) + '</b><em>BTU/h · expected ' + fmt(r.heating.range.low) + '–' + fmt(r.heating.range.high) + '</em></div>' +
           '<div class="rp-res cool"><span>Cooling load</span><b>' + fmt(r.cooling.total) + '</b><em>BTU/h · ' + r.recommendedTons + ' tons · expected ' + fmt(r.cooling.range.low) + '–' + fmt(r.cooling.range.high) + '</em></div>' +
         '</div>' +
         '<div class="rp-equip"><b>Equipment plan:</b> ' + r.recommendedTons + '-ton cooling (' + fmt(r.equipment.acBtu) + ' BTU/h) at ≈' + fmt(r.equipment.airflowCfm) + ' CFM; heating via ' + fmt(r.equipment.furnaceOutput) + ' BTU/h-output furnace or heat pump. Heat-pump balance point ≈ <b>' + r.heatpump.balanceF + '°F</b>' + (r.heatpump.auxBtu > 500 ? ' with ≈' + r.heatpump.auxKw + ' kW backup at design' : ' — no backup needed at design') + '. ' + r.equipment.suggestion + '</div>' +
         '<div class="rp-block rp-final-rec"><h2>Final recommendation — by system type</h2><table>' +
-          rrow("Single-stage A/C or gas furnace split system", r.sizing.single + " tons") +
-          rrow("Two-stage system", r.sizing.two + " tons") +
-          rrow("Variable-capacity (inverter) system", r.sizing.variable + " tons") +
-          rrow("Heat pump (any stage)", r.recommendedTons + " tons") +
+          rrow("Single-stage A/C or gas furnace split system" + recMark("single"), r.sizing.single + " tons") +
+          rrow("Two-stage system" + recMark("two"), r.sizing.two + " tons") +
+          rrow("Variable-capacity (inverter) system" + recMark("variable"), r.sizing.variable + " tons") +
+          rrow("Heat pump (any stage)" + recMark("hp"), r.recommendedTons + " tons") +
           rrow("Sensible / latent split", r.shr ? r.shr.sensiblePct + "% / " + r.shr.latentPct + "% (SHR " + r.shr.shr.toFixed(2) + ")" : "—") +
           rrow("Selected size vs. calculated load", r.equipment.manualSFit ? r.equipment.manualSFit.pctOfLoad + "% (" + (r.equipment.manualSFit.inBand ? "within Manual S band" : "closest available size — outside band") + ")" : "—") +
         '</table>' +
@@ -2420,7 +2655,7 @@
         reportReturnAir() +
         reportRooms() +
         reportRebates() +
-        reportProposal() +
+        reportEnergy() +
         reportPhotos() +
         reportPhotoInsights() +
         (opts.permit ? reportPermitSection() : "") +
@@ -2676,13 +2911,17 @@
         $("#address").value = shortAddr(m.display_name);
         hideSuggest();
         activeHistoryId = null;
+        /* token taken below, after the geo is set */
         setLoading(true, "Analyzing 8,760 hrs of climate…");
         clearError();
         var ma = m.address || {};
         state.geo = { lat: parseFloat(m.lat), lon: parseFloat(m.lon), label: m.display_name,
           city: ma.city || ma.town || ma.village || ma.municipality || ma.county || null,
           state: ma.state || null, postcode: ma.postcode || null };
-        resolveClimateAndProperty(state.geo, m.display_name).then(finishRun).catch(function () { finishRun(null); });
+        var token = newRunToken();
+        resolveClimateAndProperty(state.geo, m.display_name)
+          .then(function (prop) { finishRun(prop, token); })
+          .catch(function () { finishRun(null, token); });
       });
     });
   }
@@ -2770,7 +3009,12 @@
         '<div class="status">' + (hasAiKey ? "✓ A key is saved on this device — it never leaves it except to call the provider's API directly." : "No key set — photo analysis stays off; everything else works normally.") + '</div>' +
         '</div>' +
 
-        priceBookGroupHtml() +
+        '<div class="set-group"><div class="set-title">Send jobs to your system</div>' +
+        '<p class="sub">Paste a completed job straight into a ServiceTitan note, or post it to an automation you own (Zapier, Make, n8n) that holds your ServiceTitan credentials server-side. This app deliberately does not ask for a ServiceTitan App Key — giving one to a third-party app is prohibited by ServiceTitan\'s own integration rules, and a browser cannot keep a secret anyway.</p>' +
+        '<label>Automation webhook URL (optional)</label>' +
+        '<input type="text" id="setWebhook" value="' + escapeAttr(s.webhookUrl || "") + '" placeholder="https://hooks.zapier.com/hooks/catch/..." />' +
+        '<div class="status">Receives the structured job as JSON when you tap Send to webhook.</div>' +
+        '</div>' +
 
         '<button class="save" id="saveSettings">Save settings</button>' +
         '<button class="close" id="closeSettings">Close</button>' +
@@ -2779,7 +3023,6 @@
     var overlay = $("#overlay");
     overlay.addEventListener("click", function (e) { if (e.target === overlay) close(); });
     $("#closeSettings").addEventListener("click", close);
-    wirePriceBook();
 
     $("#logoFile").addEventListener("change", function (ev) {
       var f = ev.target.files && ev.target.files[0];
@@ -2817,6 +3060,13 @@
       cur.phone = $("#setPhone").value.trim();
       cur.license = $("#setLicense").value.trim();
       cur.email = $("#setEmail").value.trim();
+      var hookEl = $("#setWebhook");
+      if (hookEl) {
+        var hook = hookEl.value.trim();
+        // Stored only when it is a usable https endpoint, so a half-typed URL
+        // never sits in Settings looking configured.
+        cur.webhookUrl = /^https:\/\/[^\s]+$/i.test(hook) ? hook : "";
+      }
       var v = $("#apiKey").value.trim();
       if (v) cur.propertyApiKey = v; // empty keeps existing key
       var newAiProvider = $("#aiProvider").value;
@@ -2884,6 +3134,9 @@
 
   // ---------- Wire up ----------
   function init() {
+    loadLastJobType();
+    wireJobPicker();
+    wireInputDraft();
     updateFreeNote();
     $("#calcBtn").addEventListener("click", function () {
       var a = $("#address").value.trim();

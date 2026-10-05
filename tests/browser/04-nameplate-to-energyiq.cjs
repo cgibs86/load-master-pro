@@ -38,7 +38,10 @@ async function relay(route) { try { const req = route.request(); const real = aw
   await page.fill("#address", "2100 Westheimer Rd, Houston, TX"); await page.waitForTimeout(1800);
   const sug = await page.$("#suggest > *"); if (sug) await sug.click();
   await page.waitForTimeout(400);
-  if (!(await page.$(".loading, #reportBtn"))) await page.click("#calcBtn");
+  // Only start a run if the suggestion click did not: clicking Calculate as
+  // well starts a SECOND calculation, whose finish re-renders the results and
+  // throws away anything typed into them in between.
+  if (!sug) await page.click("#calcBtn");
   await page.waitForSelector("#reportBtn", { timeout: 40000 }); await page.waitForTimeout(2500);
 
   await page.setInputFiles("#photoIn", __dirname + "/px.png");
@@ -49,12 +52,12 @@ async function relay(route) { try { const req = route.request(); const real = aw
   ok("provider was called with the nameplate prompt", aiBody && JSON.stringify(aiBody).includes("018/024/030/036"));
   const card = await page.evaluate(() => document.querySelector(".ai-card, .photo-insights, #results")?.innerText || "");
   ok("nameplate findings shown as applied", /Existing unit size[\s\S]{0,40}4 ton[\s\S]{0,40}applied/i.test(card), (card.match(/Existing unit size[^\n]*\n[^\n]*/) || [""])[0]);
-  const vals = await page.evaluate(() => ({ tons: document.querySelector("#sqExTons")?.value, year: document.querySelector("#sqExYear")?.value, seer: document.querySelector("#sqExSeer")?.value, heat: document.querySelector("#sqExHeat")?.value }));
-  ok("SalesIQ current-system fields pre-filled from the data plate", vals.tons === "4" && vals.year === "2008" && vals.seer === "13" && vals.heat === "furnace", JSON.stringify(vals));
-  const sales = await page.evaluate(() => document.querySelector("#salesCard")?.innerText || "");
-  ok("SalesIQ shows the current-system cost without any typing", /Customer's current system[\s\S]*\/yr to run/.test(sales));
+  const vals = await page.evaluate(() => ({ tons: document.querySelector("#eqExTons")?.value, year: document.querySelector("#eqExYear")?.value, seer: document.querySelector("#eqExSeer")?.value, heat: document.querySelector("#eqExHeat")?.value }));
+  ok("EnergyIQ current-system fields pre-filled from the data plate", vals.tons === "4" && vals.year === "2008" && vals.seer === "13" && vals.heat === "furnace", JSON.stringify(vals));
+  const sales = await page.evaluate(() => document.querySelector("#energyCard")?.innerText || "");
+  ok("EnergyIQ shows the current-system cost without any typing", /Customer's current system[\s\S]*\/yr to run/.test(sales));
   ok("right-size verdict computed from the photo read", /% of the calculated load — /.test(sales), (sales.match(/\d+% of the calculated load — [a-z -]+/) || [""])[0]);
   ok("no runtime errors", errs.length === 0, errs.slice(0, 4).join(" | ") || "clean");
-  console.log(fails ? `\n❌ ${fails} failed` : "\n✅ nameplate -> SalesIQ checks passed");
+  console.log(fails ? `\n❌ ${fails} failed` : "\n✅ nameplate -> EnergyIQ checks passed");
   await b.close(); process.exit(fails ? 1 : 0);
 })();

@@ -119,13 +119,34 @@
         " | State: " + (c.state || "unknown") + " | ZIP: " + (c.postcode || "unknown"),
       ""
     ];
-    if (c.systemType || c.tons || c.seer2 || c.hspf2) {
-      lines.push("Proposed installation:");
-      if (c.systemType) lines.push("- System: " + c.systemType);
+    /*
+     * THE JOB TYPE IS THE MOST IMPORTANT LINE IN THIS PROMPT.
+     *
+     * Incentives are organised by measure, not by house. Duct sealing, a
+     * ductless mini-split, attic insulation and a heat-pump water heater are
+     * separate programs with separate money, separate efficiency floors and
+     * separate forms. A generic "find HVAC rebates" query on a duct job
+     * returns the wrong programs entirely, so the exact job and the phrases
+     * those programs actually use are stated first and emphatically.
+     */
+    if (c.jobType || c.systemType || c.tons || c.seer2 || c.hspf2) {
+      lines.push("THE JOB BEING QUOTED — search for programs covering THIS measure:");
+      if (c.jobType) lines.push("- Job: " + c.jobType);
+      if (c.fuel) lines.push("- Heating/cooling source: " + c.fuel);
+      if (Array.isArray(c.jobTerms) && c.jobTerms.length) {
+        lines.push("- Program names and phrases to search for: " + c.jobTerms.join("; "));
+      }
+      if (c.jobCustom) lines.push("- The contractor also notes: " + c.jobCustom);
       if (c.tons) lines.push("- Size: " + c.tons + " ton");
-      if (c.seer2) lines.push("- Cooling efficiency: " + c.seer2 + " SEER2");
-      if (c.hspf2) lines.push("- Heating efficiency: " + c.hspf2 + " HSPF2");
+      if (c.seer2) lines.push("- Cooling efficiency being considered: " + c.seer2 + " SEER2");
+      if (c.hspf2) lines.push("- Heating efficiency being considered: " + c.hspf2 + " HSPF2");
       if (c.existingAge) lines.push("- Replacing equipment roughly " + c.existingAge + " years old");
+      lines.push("");
+      lines.push("Only return programs that cover the job above. A program for a different");
+      lines.push("measure is a wrong answer here even if it exists at this address — except");
+      lines.push("that you SHOULD surface closely-related measures the homeowner could add");
+      lines.push("to this visit (for example duct sealing alongside equipment, or a smart");
+      lines.push("thermostat), clearly marked in `eligibility` as an add-on measure.");
       lines.push("");
     }
     lines.push(

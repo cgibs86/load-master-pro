@@ -72,7 +72,9 @@ const SIZES = [{ w: 390, h: 844, name: "phone" }, { w: 1280, h: 800, name: "desk
     await p.waitForTimeout(1800);
     const sug = await p.$("#suggest > *"); if (sug) await sug.click();
     await p.waitForTimeout(400);
-    if (!(await p.$(".loading, #reportBtn"))) await p.click("#calcBtn");
+    // See the note in the other probes: a second run would re-render over
+    // anything typed into the results.
+    if (!sug) await p.click("#calcBtn");
     await p.waitForSelector("#reportBtn", { timeout: 40000 });
     await p.waitForTimeout(2500);
 
@@ -83,10 +85,13 @@ const SIZES = [{ w: 390, h: 844, name: "phone" }, { w: 1280, h: 800, name: "desk
       .map(el => el.className || el.tagName).slice(0, 5));
     ok("no element in the results wider than the viewport", wide.length === 0, wide.join(", "));
 
-    // build a proposal so the printed report carries every block
-    await p.selectOption("#sqExTons", "4"); await p.fill("#sqExYear", "2008");
-    await p.fill("#sqPrice0", "9500"); await p.fill("#sqPrice1", "12500"); await p.fill("#sqPrice2", "16500");
-    await p.click("#salesBuildBtn"); await p.waitForTimeout(700);
+    // run the running-cost comparison so the printed report carries every block
+    await p.selectOption("#eqExTons", "4"); await p.fill("#eqExYear", "2008");
+    // Wait for the existing-system block itself, not for the results wrapper:
+    // the wrapper is already in the DOM, so waiting on it races the thinking
+    // overlay and the re-render behind it.
+    await p.click("#energyRunBtn");
+    await p.waitForSelector(".sq-existing", { timeout: 20000 });
     await p.click("#reportBtn"); await p.waitForTimeout(900);
     await p.emulateMedia({ media: "print" });
     await p.waitForTimeout(300);
@@ -96,13 +101,15 @@ const SIZES = [{ w: 390, h: 844, name: "phone" }, { w: 1280, h: 800, name: "desk
       const prop = root?.querySelector(".rp-prop-table");
       const cols = prop ? prop.querySelectorAll("tr")[0].children.length : 0;
       const rpW = root?.querySelector(".rp")?.getBoundingClientRect().width || 0;
-      return { hasProposal: t.includes("Replacement proposal"), hasEnvelope: t.includes("Envelope assumptions"),
+      return { hasEnergy: t.includes("Running cost by efficiency level"), hasEnvelope: t.includes("Envelope assumptions"),
+               hasJob: /\bJob\b/.test(t), noPrices: !/Installed price|net monthly|10-yr cost/i.test(t),
                cols, rpW, propW: prop ? prop.getBoundingClientRect().width : 0 };
     });
-    ok("print: proposal block present", rep.hasProposal);
+    ok("print: running-cost block present", rep.hasEnergy);
     ok("print: envelope block present", rep.hasEnvelope);
-    ok("print: proposal table has a label column + 3 options", rep.cols === 4, `${rep.cols} columns`);
-    ok("print: proposal table fits inside the report page", rep.propW <= rep.rpW + 1, `${Math.round(rep.propW)} vs ${Math.round(rep.rpW)}`);
+    ok("print: the printed report quotes no prices", rep.noPrices);
+    ok("print: running-cost table has a label column + 3 tiers", rep.cols === 4, `${rep.cols} columns`);
+    ok("print: running-cost table fits inside the report page", rep.propW <= rep.rpW + 1, `${Math.round(rep.propW)} vs ${Math.round(rep.rpW)}`);
     ok("no runtime errors", bad.length === 0, bad.slice(0, 3).join(" | "));
     await ctx.close();
   }

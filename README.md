@@ -24,21 +24,42 @@ assumption is never presented as a measurement. Precedence, strongest first:
 a number you type > a construction tier you pick or PhotoScan reads > the
 vintage x zone table > the tier default.
 
-**SalesIQ** (Pro) turns the load into a replacement proposal. An OpCost
-bin-method engine (`energy-engine.js`) runs the calculated load through a
-5°F histogram of the same year of on-site hourly weather TrueClimate already
-fetched, evaluating each unit's efficiency and capacity at the outdoor
-temperature it actually runs at: A/C EER slides with temperature from its
-SEER2 anchor, heat-pump COP and capacity fall with cold, backup strips or a
-dual-fuel furnace cover the shortfall. It estimates what the customer's
-current unit costs to run (nameplate efficiency inferred from install year
-when unknown, with an age derate), checks whether that unit was ever the
-right size against Manual S bands, and lays out Good / Better / Best at the
-tonnage Manual S picks for each stage type — with the rep's own prices,
-rebates and financing terms turned into monthly payment, net monthly cost
-after energy savings, payback and 10-year cost of ownership. Utility rates
-start from typical state averages and are meant to be overwritten from the
-customer's bill.
+**JobIQ** — the job type — is chosen before the calculation, by tapping a chip
+or typing it ("mini split", "96% furnace", "duct sealing"). `job-types.js`
+carries 30 types in six categories, and each one declares what it implies, so
+nothing downstream has to parse a string. It changes three things. The *load*:
+a ductless mini-split has no distribution losses at all, and applying the usual
+10–20% duct factor to one overstates the equipment by a whole size step on a
+small job. The *sizing*: the job's stage family picks which Manual S selection
+applies, and the recommendation table marks that row as the answer instead of
+handing the rep four equally-weighted options. And the *incentives*, most of
+all — the rebate world is organised by measure, not by house, so a duct-sealing
+job and a mini-split job share almost no programs. Job hints rank below any
+number the user typed, never above. Anything typed that the catalogue doesn't
+recognise is kept verbatim and sent to the incentive search, where "swamp
+cooler swap" may be exactly the phrase that finds the program.
+
+**EnergyIQ** (Pro) is the engineering case a quote attaches to — and
+deliberately not the quote. An OpCost bin-method engine (`energy-engine.js`)
+runs the calculated load through a 5°F histogram of the same year of on-site
+hourly weather TrueClimate already fetched, evaluating each unit's efficiency
+and capacity at the outdoor temperature it actually runs at: A/C EER slides
+with temperature from its SEER2 anchor, heat-pump COP and capacity fall with
+cold, backup strips or a dual-fuel furnace cover the shortfall. It estimates
+what the customer's current unit costs to run (nameplate efficiency inferred
+from install year when unknown, with an age derate), checks whether that unit
+was ever the right size against Manual S bands, and lays out three efficiency
+levels at the tonnage Manual S picks for each stage type, each with its annual
+running cost and its saving against the current system. The fuel family and the
+efficiency metric shown both come from the job type, so a furnace-only job is
+rated on AFUE rather than on a SEER2 number the rep has to explain away.
+Utility rates start from typical state averages and are meant to be overwritten
+from the customer's bill.
+
+There are no prices, no financing, no payback and no proposal here, by design.
+Shops already run ServiceTitan or equivalent for that, and a second place to
+keep prices is a second place for them to go stale. What this app owns is the
+engineering; what the quoting software owns is the money.
 
 **RoomIQ** (Pro) answers the question the customer actually called about.
 Enter the rooms and how many supply registers each has, and `room-loads.js`
@@ -52,12 +73,26 @@ that are starved of air, rooms that are over-supplied and could give air back,
 west-facing glass, and rooms sandwiched between unconditioned spaces, then
 writes the diagnosis in sentences a rep can read out loud.
 
-**Price book** (Settings) is the shop's own equipment and pricing, saved once
-on the device. `price-book.js` matches a line by tier, fuel and stage, prices
-it at the exact tonnage Manual S picked for that stage type (flat, base plus
-per-ton, or an explicit price per stocked size), and SalesIQ fills every
-proposal from it automatically. A figure the rep types on a job always wins,
-so opening a saved job never rewrites what it was quoted at.
+**ServiceTitan hand-off.** `job-export.js` gets the finished job out of this
+app and onto the work order three ways: a formatted plain-text summary on the
+clipboard (paste into a ServiceTitan job note, estimate description or task — no
+setup, works for everyone), an https POST of a flat JSON payload to a webhook
+the shop owns (Zapier, Make, n8n, or their own endpoint), and a JSON download
+for an importer or a developer.
+
+It does not ask for ServiceTitan credentials, and it never will. Their API uses
+OAuth 2.0 client credentials — Client ID, Client Secret, App Key, Tenant ID —
+which a static browser app cannot hold, and ServiceTitan explicitly prohibits
+*tunneling*: granting a third-party application you do not own access to your
+App Key. Asking a contractor to paste theirs in here would be asking them to
+break their own ServiceTitan agreement. The credentials belong server-side
+under the shop's own app registration, which is exactly where the webhook route
+puts them. A test asserts no credential field exists anywhere in that module.
+The payload is deliberately flat and explicitly named (`cooling_btuh`, not a
+nested blob) because the thing on the far end is usually a no-code automation
+step where someone maps fields by hand. `no-cors` is not used: a silent opaque
+success would be worse than an honest CORS failure, because the rep would
+believe the job was sent.
 
 **RebateIQ** (Pro) searches the live web for the grants, tax credits, utility
 rebates and income-qualified programs that apply to one address and the system
@@ -91,6 +126,18 @@ in the cache for next time. `sw-register.js` fetches the worker script past the
 HTTP cache, re-checks on tab focus, and reloads once when a new worker takes
 over, so an open tab picks up a deploy instead of sitting on a stale page.
 
+**Keeping the inputs.** The results page is rebuilt from state whenever
+anything else finishes — a photo analysis, an incentive search, a job-type
+change — and the fine-tune and current-system fields used to be read only when
+their button was pressed. A rep could measure the attic, type R-19, have a
+background job land, and get a load computed from the code-era guess on a page
+that still looked finished. The current-system fields now write to state on
+every edit; the fine-tune panel keeps a per-field draft that is written back
+after each render, along with the panel's open state, and dropped when a new
+calculation starts. Separately, every calculation now carries a token, so a
+straggling result from a superseded run can no longer wipe the overrides out
+from under a page the rep is already working in.
+
 > **Estimating tool only.** Results are a Manual J–style approximation for quick
 > sizing guidance — not a stamped engineering report. Confirm final equipment
 > sizing with a licensed HVAC professional.
@@ -119,8 +166,8 @@ npm start
 ### Tests
 
 ```bash
-npm test                # 377 hermetic unit checks: load engine, climate engine, energy engine, AI providers, permit search, PhotoScan
-npm run audit:browser   # live-browser regression: app flow, EnvelopeIQ, SalesIQ, nameplate, layout/print, RoomIQ, price book, thinking overlay + free tier (needs network + Playwright's Chromium)
+npm test                # 439 hermetic unit checks: load engine, climate engine, energy engine, AI providers, permit search, PhotoScan, room loads, job types, job export, RebateIQ
+npm run audit:browser   # live-browser regression: app flow, EnvelopeIQ, nameplate -> EnergyIQ, layout/print, RoomIQ, thinking overlay + free tier, cache freshness, RebateIQ, job types + ServiceTitan hand-off (needs network + Playwright's Chromium)
 ```
 
 ## Pro: permit & code search

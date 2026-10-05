@@ -36,7 +36,7 @@ async function openPanel(page) {
   const sug = await page.$("#suggest > *"); if (sug) await sug.click();
   await page.waitForTimeout(400);
   // Picking a suggestion already starts a run; only press Calculate if it didn't.
-  if (!(await page.$(".loading, #reportBtn"))) await page.click("#calcBtn");
+  if (!sug) await page.click("#calcBtn");
   await page.waitForSelector("#reportBtn", { timeout: 40000 });
   await page.waitForTimeout(2500);   // let any second in-flight run settle before touching inputs
 

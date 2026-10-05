@@ -67,7 +67,10 @@ async function runCalc(page) {
   await page.waitForTimeout(1800);
   const sug = await page.$("#suggest > *"); if (sug) await sug.click();
   await page.waitForTimeout(400);
-  if (!(await page.$(".loading, #reportBtn"))) await page.click("#calcBtn");
+  // Only start a run if the suggestion click did not: clicking Calculate as
+  // well starts a SECOND calculation, whose finish re-renders the results and
+  // throws away anything typed into them in between.
+  if (!sug) await page.click("#calcBtn");
   await page.waitForSelector("#reportBtn", { timeout: 40000 });
   await page.waitForTimeout(2500);
 }
@@ -130,14 +133,9 @@ async function runCalc(page) {
     ok("the sourceless fabricated program never reached the page", !/Fabricated program/.test(card));
     ok("its javascript: link never reached the DOM", !(await page.evaluate(() => document.body.innerHTML.includes("javascript:alert"))));
 
-    // Feed the proposal
-    const before = await page.$eval("#sqRebate2", el => el.value).catch(() => null);
-    await page.click("#rebateUseBtn");
-    await page.waitForTimeout(900);
-    const after = await page.$eval("#sqRebate2", el => el.value).catch(() => null);
-    ok("the total can be applied to the proposal", after === "3200", `${before} -> ${after}`);
-    ok("...to the Best option only, not silently to all three",
-      (await page.$eval("#sqRebate0", el => el.value)) === "" && (await page.$eval("#sqRebate1", el => el.value)) === "");
+    // The app no longer builds proposals, so an unverified researched figure
+    // must NOT have a one-tap route into a customer price.
+    ok("there is no one-tap 'apply to the proposal' shortcut any more", await page.$("#rebateUseBtn") === null);
 
     // Printed appendix
     await page.click("#reportBtn");

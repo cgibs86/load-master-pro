@@ -22,7 +22,10 @@ async function runCalc(page, addr) {
   await page.waitForTimeout(1800);
   const sug = await page.$("#suggest > *"); if (sug) await sug.click();
   await page.waitForTimeout(400);
-  if (!(await page.$(".loading, #reportBtn"))) await page.click("#calcBtn");
+  // Only start a run if the suggestion click did not: clicking Calculate as
+  // well starts a SECOND calculation, whose finish re-renders the results and
+  // throws away anything typed into them in between.
+  if (!sug) await page.click("#calcBtn");
 }
 
 (async () => {

@@ -6,7 +6,7 @@
  * quality, windows, foundation, ceiling height, size) that the calculator can
  * fold into the load numbers — plus, when a photo shows the existing
  * equipment's data plate, its tonnage / year / SEER / heating type, which
- * pre-fill the "customer's current system" in SalesIQ. Entirely optional: no photos or no API key
+ * pre-fill the "customer's current system" in EnergyIQ. Entirely optional: no photos or no API key
  * means the calculator behaves exactly as before.
  *
  * Transport (which provider, which HTTP shape) lives in ai-providers.js — this

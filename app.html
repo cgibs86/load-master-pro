@@ -48,6 +48,15 @@
                placeholder="123 Main St, Austin, TX 78701" />
       </div>
       <div id="suggest"></div>
+
+      <label class="field-label" for="jobSearch">What is this job?</label>
+      <div class="job-pick" id="jobPick">
+        <input id="jobSearch" type="text" autocomplete="off" placeholder="Type it — mini split, 96% furnace, duct sealing…" />
+        <div id="jobSuggest"></div>
+        <div id="jobChips"></div>
+        <div id="jobChosen"></div>
+      </div>
+
       <button class="cta" id="calcBtn">
         <span class="cta-label">Calculate load</span>
       </button>
@@ -81,7 +90,8 @@
   <script src="climate-engine.js"></script>
   <script src="energy-engine.js"></script>
   <script src="room-loads.js"></script>
-  <script src="price-book.js"></script>
+  <script src="job-types.js"></script>
+  <script src="job-export.js"></script>
   <script src="rebate-iq.js"></script>
   <script src="loadcalc.js"></script>
   <script src="ai-providers.js"></script>
