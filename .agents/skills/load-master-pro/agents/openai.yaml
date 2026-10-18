@@ -1,0 +1,6 @@
+interface:
+  display_name: "Load Master Pro"
+  short_description: "Repo-specific patterns and workflows for load-master-pro"
+  default_prompt: "Use the load-master-pro repo skill to follow existing architecture, testing, and workflow conventions."
+policy:
+  allow_implicit_invocation: true
