@@ -26,11 +26,22 @@ async function relay(route) {
   } catch (e) { await route.fulfill({ status: 599, body: "{}" }); }
 }
 
+// The results are a dashboard: each tool's card lives in a sheet that its tile
+// opens. A sheet stays open across the re-render its own buttons cause.
+async function openSheet(page, id) {
+  if (await page.$(`#ds-${id}.open`)) return;
+  if (await page.$(".dsheet.open")) await closeSheet(page);
+  await page.click(`[data-open="${id}"]`);
+  await page.waitForSelector(`#ds-${id}.open`, { timeout: 5000 });
+}
+async function closeSheet(page) {
+  const x = await page.$(".dsheet.open .dsheet-x");
+  if (!x) return;
+  await x.click();
+  await page.waitForSelector(".dsheet.open", { state: "detached", timeout: 5000 });
+}
 async function openPanel(page) {
-  // The results re-render (and the <details> collapses) after every
-  // Recalculate, so only click the summary when it's actually closed.
-  const open = await page.evaluate(() => !!document.querySelector("#adjustDetails")?.open);
-  if (!open) await page.click("#adjustDetails summary");
+  await openSheet(page, "adjust");
   await page.waitForSelector("#inArea", { state: "visible" });
 }
 (async () => {
@@ -89,10 +100,10 @@ async function openPanel(page) {
   await page.waitForTimeout(600);
 
   const core = await page.evaluate(() => ({
-    heat: document.querySelector(".load-card.heat .count")?.textContent,
-    cool: document.querySelector(".load-card.cool .count")?.textContent,
-    tons: document.querySelector(".equip-card .badge")?.textContent,
-    climateChip: document.querySelector(".chips .chip")?.textContent,
+    heat: document.querySelector("#kpi-heat .count")?.textContent,
+    cool: document.querySelector("#kpi-cool .count")?.textContent,
+    tons: document.querySelector("#kpi-cool .kpi-val")?.textContent,
+    climateChip: document.querySelector(".dh-meta .dh-pill")?.textContent,
     shr: document.querySelector(".shr-note")?.textContent?.slice(0, 60),
     finalTons: document.querySelector(".final-rec-tons")?.textContent,
   }));
@@ -133,7 +144,7 @@ async function openPanel(page) {
   await page.click("#recalcBtn");
   await page.waitForTimeout(500);
   const after = await page.evaluate(() => ({
-    cool: document.querySelector(".load-card.cool .count")?.textContent,
+    cool: document.querySelector("#kpi-cool .count")?.textContent,
     atticRow: Array.from(document.querySelectorAll(".kv")).map((k) => k.textContent).find((t) => t.includes("Attic")),
   }));
   ok("recalculate applies overrides", /\d/.test(after.cool || ""), `cooling ${after.cool}`);
@@ -148,6 +159,7 @@ async function openPanel(page) {
 
   // ---------- 4. Return-air check ----------
   console.log("\n=== Return-air check ===");
+  await openSheet(page, "airflow");
   await page.selectOption("#inRetAirMode", "grille");
   // Changing the mode rebuilds #retAirFields, so wait for the grille inputs to
   // actually exist rather than guessing at a delay — a fixed wait raced the
@@ -163,6 +175,7 @@ async function openPanel(page) {
 
   // ---------- 5. Report ----------
   console.log("\n=== Report generation ===");
+  await closeSheet(page);
   await page.click("#reportBtn");
   await page.waitForTimeout(700);
   const rep = await page.evaluate(() => {

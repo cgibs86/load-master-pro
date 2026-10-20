@@ -8,6 +8,15 @@ const BASE = process.env.LMP_BASE || "http://localhost:8099";
 const SHOTS = process.env.LMP_SHOTS || require("os").tmpdir();
 let fails = 0;
 function ok(l, c, d) { console.log(`   ${c ? "✅" : "❌"} ${l}${d ? " — " + d : ""}`); if (!c) fails++; }
+// The results are a dashboard: each tool's card lives in a sheet its tile
+// opens, and stays open across the re-render its own buttons cause.
+async function openSheet(page, id) {
+  if (await page.$(`#ds-${id}.open`)) return;
+  const x = await page.$(".dsheet.open .dsheet-x");
+  if (x) { await x.click(); await page.waitForSelector(".dsheet.open", { state: "detached", timeout: 5000 }); }
+  await page.click(`[data-open="${id}"]`);
+  await page.waitForSelector(`#ds-${id}.open`, { timeout: 5000 });
+}
 async function relay(route) { try { const req = route.request(); const real = await fetch(req.url(), { method: req.method(), headers: req.headers() }); await route.fulfill({ status: real.status, contentType: real.headers.get("content-type") || "application/json", body: await real.text() }); } catch (e) { await route.fulfill({ status: 599, body: "{}" }); } }
 (async () => {
   const b = await chromium.launch({ args: ["--no-sandbox"] });
@@ -44,17 +53,24 @@ async function relay(route) { try { const req = route.request(); const real = aw
   if (!sug) await page.click("#calcBtn");
   await page.waitForSelector("#reportBtn", { timeout: 40000 }); await page.waitForTimeout(2500);
 
+  await openSheet(page, "photos");
   await page.setInputFiles("#photoIn", __dirname + "/px.png");
   await page.waitForTimeout(800);
   ok("photo added", await page.evaluate(() => document.querySelectorAll(".photo-x").length) === 1);
   await page.click("#aiAnalyzeBtn");
   await page.waitForTimeout(1500);
   ok("provider was called with the nameplate prompt", aiBody && JSON.stringify(aiBody).includes("018/024/030/036"));
-  const card = await page.evaluate(() => document.querySelector(".ai-card, .photo-insights, #results")?.innerText || "");
+  // The findings card, read as rendered in its sheet. (This used to query
+  // ".ai-card, .photo-insights, #results", which always returned #results —
+  // the ancestor comes first in document order — so it never isolated the card.)
+  const card = await page.evaluate(() => document.querySelector("#ds-photos.open .ai-card")?.innerText || "");
   ok("nameplate findings shown as applied", /Existing unit size[\s\S]{0,40}4 ton[\s\S]{0,40}applied/i.test(card), (card.match(/Existing unit size[^\n]*\n[^\n]*/) || [""])[0]);
   const vals = await page.evaluate(() => ({ tons: document.querySelector("#eqExTons")?.value, year: document.querySelector("#eqExYear")?.value, seer: document.querySelector("#eqExSeer")?.value, heat: document.querySelector("#eqExHeat")?.value }));
   ok("EnergyIQ current-system fields pre-filled from the data plate", vals.tons === "4" && vals.year === "2008" && vals.seer === "13" && vals.heat === "furnace", JSON.stringify(vals));
+  await openSheet(page, "energy");
   const sales = await page.evaluate(() => document.querySelector("#energyCard")?.innerText || "");
+  ok("the EnergyIQ tile shows what the current unit costs to run",
+    /\/yr now/.test(await page.evaluate(() => document.querySelector("#tile-energy")?.innerText || "")));
   ok("EnergyIQ shows the current-system cost without any typing", /Customer's current system[\s\S]*\/yr to run/.test(sales));
   ok("right-size verdict computed from the photo read", /% of the calculated load — /.test(sales), (sales.match(/\d+% of the calculated load — [a-z -]+/) || [""])[0]);
   ok("no runtime errors", errs.length === 0, errs.slice(0, 4).join(" | ") || "clean");

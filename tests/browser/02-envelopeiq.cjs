@@ -14,12 +14,28 @@ async function relay(route) {
     await route.fulfill({ status: real.status, contentType: real.headers.get("content-type") || "application/json", body: await real.text() });
   } catch (e) { await route.fulfill({ status: 599, body: "{}" }); }
 }
+// The results are a dashboard: each tool's card lives in a sheet its tile
+// opens, and stays open across the re-render its own buttons cause.
+async function openSheet(page, id) {
+  if (await page.$(`#ds-${id}.open`)) return;
+  if (await page.$(".dsheet.open")) await closeSheet(page);
+  await page.click(`[data-open="${id}"]`);
+  await page.waitForSelector(`#ds-${id}.open`, { timeout: 5000 });
+}
+async function closeSheet(page) {
+  const x = await page.$(".dsheet.open .dsheet-x");
+  if (!x) return;
+  await x.click();
+  await page.waitForSelector(".dsheet.open", { state: "detached", timeout: 5000 });
+}
 async function openPanel(page) {
-  // The results re-render (and the <details> collapses) after every
-  // Recalculate, so only click the summary when it's actually closed.
-  const open = await page.evaluate(() => !!document.querySelector("#adjustDetails")?.open);
-  if (!open) await page.click("#adjustDetails summary");
+  await openSheet(page, "adjust");
   await page.waitForSelector("#inArea", { state: "visible" });
+}
+// Read EnvelopeIQ the way the rep sees it: in its open sheet, rendered.
+async function envelopeText(page) {
+  await openSheet(page, "envelope");
+  return page.evaluate(() => document.querySelector(".env-card")?.innerText || "");
 }
 (async () => {
   const b = await chromium.launch({ args: ["--no-sandbox"] });
@@ -40,10 +56,10 @@ async function openPanel(page) {
   await page.waitForSelector("#reportBtn", { timeout: 40000 });
   await page.waitForTimeout(2500);   // let any second in-flight run settle before touching inputs
 
-  const before = await page.evaluate(() => ({
-    cool: document.querySelector(".load-card.cool .count")?.textContent,
-    card: document.querySelector(".env-card")?.innerText || ""
-  }));
+  const before = {
+    cool: await page.evaluate(() => document.querySelector("#kpi-cool .count")?.textContent),
+    card: await envelopeText(page)
+  };
   ok("EnvelopeIQ card renders", !!before.card, before.card.split("\n")[1]);
   ok("falls back to tier without a year built", /tier default/i.test(before.card));
 
@@ -52,11 +68,11 @@ async function openPanel(page) {
   await page.fill("#inYearBuilt", "1965");
   await page.click("#recalcBtn");
   await page.waitForTimeout(600);
-  const old = await page.evaluate(() => ({
-    cool: document.querySelector(".load-card.cool .count")?.textContent,
-    card: document.querySelector(".env-card")?.innerText || "",
-    ph: document.querySelector("#inAtticR")?.placeholder
-  }));
+  const old = {
+    cool: await page.evaluate(() => document.querySelector("#kpi-cool .count")?.textContent),
+    ph: await page.evaluate(() => document.querySelector("#inAtticR")?.placeholder),
+    card: await envelopeText(page)
+  };
   ok("year built engages the vintage x zone table", /code-era typical/i.test(old.card), old.card.split("\n")[1]);
   ok("attic placeholder names the assumed value", /assumed for a 1965 home in zone/.test(old.ph || ""), old.ph);
 
@@ -65,10 +81,10 @@ async function openPanel(page) {
   await page.fill("#inYearBuilt", "2019");
   await page.click("#recalcBtn");
   await page.waitForTimeout(600);
-  const nw = await page.evaluate(() => ({
-    cool: document.querySelector(".load-card.cool .count")?.textContent,
-    card: document.querySelector(".env-card")?.innerText || ""
-  }));
+  const nw = {
+    cool: await page.evaluate(() => document.querySelector("#kpi-cool .count")?.textContent),
+    card: await envelopeText(page)
+  };
   const n = (t) => parseInt((t || "0").replace(/[^0-9]/g, ""), 10);
   ok("a 2019 home loads lower than the same 1965 home", n(nw.cool) < n(old.cool), `1965 ${old.cool} vs 2019 ${nw.cool}`);
   ok("2019 card shows the newer era", /2021|2012-2020|2012/.test(nw.card), nw.card.split("\n")[1]);
@@ -78,7 +94,7 @@ async function openPanel(page) {
   await page.click('#segQuality button[data-q="poor"]');
   await page.click("#recalcBtn");
   await page.waitForTimeout(600);
-  const tier = await page.evaluate(() => document.querySelector(".env-card")?.innerText || "");
+  const tier = await envelopeText(page);
   await openPanel(page);
   console.log("   DEBUG year field after tier recalc:", JSON.stringify(await page.$eval("#inYearBuilt", el => el.value)));
   ok("an explicit construction-tier pick outranks the vintage table", /construction tier overrides/i.test(tier) && !/CODE-ERA TYPICAL\n/i.test(tier), tier.split("\n")[1]);
@@ -88,9 +104,10 @@ async function openPanel(page) {
   await page.fill("#inAtticR", "60");
   await page.click("#recalcBtn");
   await page.waitForTimeout(600);
-  const entered = await page.evaluate(() => document.querySelector(".env-card")?.innerText || "");
+  const entered = await envelopeText(page);
   ok("a typed R-value is tagged as entered", /R-60\s*\n\s*YOU ENTERED/i.test(entered), entered.split("\n").slice(4,8).join(" / "));
 
+  await closeSheet(page);
   await page.click("#reportBtn"); await page.waitForTimeout(800);
   const rep = await page.evaluate(() => document.querySelector("#reportRoot")?.textContent || "");
   ok("report carries the envelope appendix", rep.includes("Envelope assumptions"));

@@ -14,6 +14,20 @@ async function relay(route) {
     await route.fulfill({ status: real.status, contentType: real.headers.get("content-type") || "application/json", body: await real.text() });
   } catch (e) { await route.fulfill({ status: 599, body: "{}" }); }
 }
+// The results are a dashboard: each tool's card lives in a sheet its tile
+// opens, and stays open across the re-render its own buttons cause.
+async function openSheet(page, id) {
+  if (await page.$(`#ds-${id}.open`)) return;
+  await closeSheet(page);
+  await page.click(`[data-open="${id}"]`);
+  await page.waitForSelector(`#ds-${id}.open`, { timeout: 5000 });
+}
+async function closeSheet(page) {
+  const x = await page.$(".dsheet.open .dsheet-x");
+  if (!x) return;
+  await x.click();
+  await page.waitForSelector(".dsheet.open", { state: "detached", timeout: 5000 });
+}
 async function addRoom(page, i, r) {
   await page.click("#rqAddBtn");
   await page.waitForSelector(`#rqName${i}`, { state: "visible" });
@@ -49,7 +63,9 @@ async function addRoom(page, i, r) {
   await page.waitForSelector("#reportBtn", { timeout: 40000 });
   await page.waitForTimeout(2500);
 
-  ok("RoomIQ card renders for a Pro user", await page.$("#roomCard") !== null);
+  ok("the RoomIQ tile invites the first room", /Add rooms/.test(await page.evaluate(() => document.querySelector("#tile-rooms")?.innerText || "")));
+  await openSheet(page, "rooms");
+  ok("RoomIQ card renders for a Pro user", await page.$("#ds-rooms.open #roomCard") !== null);
   ok("it starts with no rooms and invites the first one", /Start with the room the customer complains about/.test(await page.evaluate(() => document.querySelector("#roomCard")?.innerText || "")));
 
   await addRoom(page, 0, { name: "Living room", area: 500, type: "living", walls: 2, orient: "s", supplies: 3 });
@@ -69,6 +85,9 @@ async function addRoom(page, i, r) {
   ok("it says airflow not tonnage is the fix", /no amount of extra tonnage/.test(out));
   ok("the bonus room is named as the problem", /Bonus over garage needs about/.test(out), (out.match(/Bonus over garage needs about \d+ CFM[^.]*\./) || [""])[0].slice(0, 80));
   ok("inputs still hold their values after diagnosing", await page.$eval("#rqSup2", el => el.value) === "1");
+  ok("the sheet stayed open through every add and the diagnosis", await page.$("#ds-rooms.open") !== null);
+  const roomTile = await page.evaluate(() => document.querySelector("#tile-rooms")?.innerText || "");
+  ok("the dashboard tile names the problem without opening anything", /short of air|flagged/.test(roomTile), roomTile.replace(/\n/g, " · "));
 
   // Rooms must not change the whole-house answer.
   const tonsBefore = await page.evaluate(() => document.querySelector(".final-rec-tons")?.textContent);
@@ -84,6 +103,7 @@ async function addRoom(page, i, r) {
   ok("...and keeps the others", names.includes("Living room") && names.includes("Bonus over garage"));
 
   // Report appendix
+  await closeSheet(page);
   await page.click("#reportBtn"); await page.waitForTimeout(900);
   const rep = await page.evaluate(() => document.querySelector("#reportRoot")?.textContent || "");
   ok("report carries the room-by-room table", rep.includes("Room-by-room diagnosis"));
@@ -104,8 +124,12 @@ async function addRoom(page, i, r) {
   await p2.waitForTimeout(400);
   if (!s2) await p2.click("#calcBtn");
   await p2.waitForSelector("#reportBtn", { timeout: 40000 }); await p2.waitForTimeout(600);
-  const guest = await p2.evaluate(() => Array.from(document.querySelectorAll(".permit-card.locked")).map(e => e.innerText.slice(0, 30)));
-  ok("guest sees the locked RoomIQ teaser", guest.some(t => /RoomIQ/.test(t)), guest.join(" | "));
+  const guestTile = await p2.evaluate(() => { const t = document.querySelector("#tile-rooms"); return { locked: !!(t && t.classList.contains("locked")), text: t ? t.innerText : "" }; });
+  ok("guest sees RoomIQ as a locked Pro tile", guestTile.locked && /PRO/.test(guestTile.text), guestTile.text.replace(/\n/g, " · "));
+  await p2.click("#tile-rooms");
+  await p2.waitForSelector("#ds-rooms.open", { timeout: 5000 });
+  const teaser = await p2.evaluate(() => document.querySelector("#ds-rooms.open .permit-card.locked")?.innerText || "");
+  ok("...and tapping it shows the RoomIQ teaser with a way in", /room/i.test(teaser) && /free trial/i.test(teaser), teaser.slice(0, 60));
 
   ok("no runtime errors", errs.length === 0, errs.slice(0, 4).join(" | ") || "clean");
   console.log(fails ? `\n❌ ${fails} failed` : "\n✅ RoomIQ checks passed");

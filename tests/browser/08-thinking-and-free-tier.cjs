@@ -73,12 +73,17 @@ async function runCalc(page, addr) {
     // ---------- 2. Overlay on the other actions ----------
     for (const [name, open, label] of [
       ["Recalculate", async () => {
-        const isOpen = await page.evaluate(() => !!document.querySelector("#adjustDetails")?.open);
-        if (!isOpen) await page.click("#adjustDetails summary");
+        // Fine-tune lives in its own sheet on the dashboard.
+        if (!(await page.$("#ds-adjust.open"))) await page.click("#adjustBtn");
         await page.waitForSelector("#recalcBtn", { state: "visible" });
         await page.click("#recalcBtn");
       }, /Recalculating/i],
-      ["Generate report", async () => { await page.click("#reportBtn"); }, /report/i],
+      ["Generate report", async () => {
+        // The sheet stays open across the recalculation; close it to reach the bar.
+        const x = await page.$(".dsheet.open .dsheet-x");
+        if (x) { await x.click(); await page.waitForSelector(".dsheet.open", { state: "detached", timeout: 5000 }); }
+        await page.click("#reportBtn");
+      }, /report/i],
     ]) {
       const seen = { hit: false, msg: "" };
       const poll = setInterval(async () => {

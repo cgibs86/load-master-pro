@@ -83,15 +83,39 @@ const SIZES = [{ w: 390, h: 844, name: "phone" }, { w: 1280, h: 800, name: "desk
     const wide = await p.evaluate(() => Array.from(document.querySelectorAll("#results *"))
       .filter(el => el.getBoundingClientRect().width > window.innerWidth + 1)
       .map(el => el.className || el.tagName).slice(0, 5));
-    ok("no element in the results wider than the viewport", wide.length === 0, wide.join(", "));
+    ok("no element on the dashboard wider than the viewport", wide.length === 0, wide.join(", "));
+
+    // Every tool's card lives in a hidden sheet, and hidden elements have no
+    // size — so open each sheet in turn and check what is inside it.
+    const sheetIds = await p.$$eval(".dsheet", els => els.map(e => e.getAttribute("data-sheet")));
+    ok("every tool has a sheet", sheetIds.length >= 12, sheetIds.join(","));
+    for (const id of sheetIds) {
+      await p.click(`[data-open="${id}"]`);
+      await p.waitForSelector(`#ds-${id}.open`, { timeout: 5000 });
+      const r = await p.evaluate((sid) => {
+        const sheet = document.querySelector(`#ds-${sid}`);
+        const panel = sheet.querySelector(".dsheet-panel").getBoundingClientRect();
+        const wideIn = Array.from(sheet.querySelectorAll(".dsheet-body *"))
+          .filter(el => el.getBoundingClientRect().width > window.innerWidth + 1)
+          .map(el => el.className || el.tagName).slice(0, 3);
+        return { wideIn, fits: panel.left >= -1 && panel.right <= window.innerWidth + 1 && panel.top >= -1 };
+      }, id);
+      ok(`sheet "${id}" @phone: nothing wider than the screen, panel on screen`, r.wideIn.length === 0 && r.fits, r.wideIn.join(", "));
+      await p.click(`#ds-${id} .dsheet-x`);
+      await p.waitForSelector(".dsheet.open", { state: "detached", timeout: 5000 });
+    }
 
     // run the running-cost comparison so the printed report carries every block
+    await p.click("#tile-energy");
+    await p.waitForSelector("#ds-energy.open", { timeout: 5000 });
     await p.selectOption("#eqExTons", "4"); await p.fill("#eqExYear", "2008");
     // Wait for the existing-system block itself, not for the results wrapper:
     // the wrapper is already in the DOM, so waiting on it races the thinking
     // overlay and the re-render behind it.
     await p.click("#energyRunBtn");
     await p.waitForSelector(".sq-existing", { timeout: 20000 });
+    await p.click("#ds-energy .dsheet-x");
+    await p.waitForSelector(".dsheet.open", { state: "detached", timeout: 5000 });
     await p.click("#reportBtn"); await p.waitForTimeout(900);
     await p.emulateMedia({ media: "print" });
     await p.waitForTimeout(300);

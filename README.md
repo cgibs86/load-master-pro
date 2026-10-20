@@ -118,6 +118,23 @@ boundary rather than a security control — server-enforced entitlements come
 with the Supabase work in SETUP.md. Paid plans are Solo $199/mo, Pro $499/mo,
 and Fleet by quote.
 
+**The results are a dashboard.** They used to be one long report — at phone
+width about nine screens tall, seventeen stacked sections, the recommendation
+five screens down and the tonnage stated five times. Now the address and job,
+four answer tiles (cooling tons, heating BTU/h, airflow, balance point) and
+eight tool tiles fit on about one and a half phone screens, and each tool's
+full card opens in a sheet: a bottom sheet on phones, a drawer beside the
+dashboard on desktop. Each tile carries one live headline — *4 of 4 assumed*,
+*$3,200 found*, *1 short of air*, *job changed — search again* — coloured by
+whether it needs attention, so the rep can see what is left to check without
+opening anything. Report, Send and Adjust stay pinned in reach. The cards
+themselves are unchanged and always in the DOM, just hidden, which is what
+keeps every handler and saved-input path working; a sheet that is open when
+the page re-renders stays open at the same scroll position. Sheets close with
+✕, the backdrop, Escape, or the phone's Back button (each sheet pushes a
+history entry, so Back never leaves the app and throws the calculation away).
+The printed PDF is still the full report — that is its job.
+
 **Caching.** The service worker is network-first for code (documents, JS, CSS,
 the manifest) with a 3.5s timeout and a cache fallback, and cache-first only
 for images. It was cache-first for everything, which meant a deploy was always
@@ -133,10 +150,11 @@ their button was pressed. A rep could measure the attic, type R-19, have a
 background job land, and get a load computed from the code-era guess on a page
 that still looked finished. The current-system fields now write to state on
 every edit; the fine-tune panel keeps a per-field draft that is written back
-after each render, along with the panel's open state, and dropped when a new
-calculation starts. Separately, every calculation now carries a token, so a
-straggling result from a superseded run can no longer wipe the overrides out
-from under a page the rep is already working in.
+after each render, and dropped when a new
+calculation starts. RoomIQ's rows save on every edit the same way. Separately,
+every calculation now carries a token, so a straggling result from a superseded
+run can no longer wipe the overrides out from under a page the rep is already
+working in.
 
 > **Estimating tool only.** Results are a Manual J–style approximation for quick
 > sizing guidance — not a stamped engineering report. Confirm final equipment
@@ -167,7 +185,7 @@ npm start
 
 ```bash
 npm test                # 439 hermetic unit checks: load engine, climate engine, energy engine, AI providers, permit search, PhotoScan, room loads, job types, job export, RebateIQ
-npm run audit:browser   # live-browser regression: app flow, EnvelopeIQ, nameplate -> EnergyIQ, layout/print, RoomIQ, thinking overlay + free tier, cache freshness, RebateIQ, job types + ServiceTitan hand-off (needs network + Playwright's Chromium)
+npm run audit:browser   # live-browser regression: app flow, EnvelopeIQ, nameplate -> EnergyIQ, layout/print (inside every sheet), RoomIQ, thinking overlay + free tier, cache freshness, RebateIQ, job types + ServiceTitan hand-off, and the dashboard itself — Back/Escape/refresh/double-submit/locked plans/desktop drawer (needs network + Playwright's Chromium)
 ```
 
 ## Pro: permit & code search

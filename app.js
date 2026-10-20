@@ -248,6 +248,8 @@
   function finishRun(prop, token) {
     if (token != null && !isCurrentRun(token)) return;
     clearInputDraft();
+    closeSheet();
+    freshRender = true;
     state.overrides = {};
     state.photos = [];
     state.photoAI = null;
@@ -439,66 +441,41 @@
   function render() {
     var r = state.result, c = state.climate, p = state.property, e = state.effective;
     var qualityLabel = { good: "Well insulated", average: "Average construction", poor: "Older / leaky" }[e.quality];
-
-    var propChip = p.source === "fetched"
-      ? '<div class="chip"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>Auto-fetched&nbsp;<b>' + fmt(e.area) + ' ft²</b></div>'
-      : '<div class="chip warn tap" id="adjustChip"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>Estimated&nbsp;<b>' + fmt(e.area) + ' ft²</b> · tap to adjust</div>';
-
-    var climateChip = c.source === "live"
-      ? '<div class="chip live"><span class="pulse"></span>TrueClimate&nbsp;·&nbsp;<b>' + fmt(c.hours) + ' hrs</b> analyzed here</div>'
-      : '<div class="chip' + ((c.distance || 0) > 75 ? ' warn' : '') + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg><b>' + escapeHtml(c.city) + '</b> station data' + (c.distance ? ' · ' + fmt(c.distance) + ' mi away' : '') + '</div>';
-    var elevChip = (c.elevFt || 0) > 1500
-      ? '<div class="chip">⛰ ' + fmt(c.elevFt) + ' ft&nbsp;·&nbsp;air ×' + r.inputs.acf + '</div>' : '';
+    var fresh = freshRender;
+    freshRender = false;
 
     var html =
-      '<div class="chips">' +
-        climateChip +
-        '<div class="chip">❄ ' + c.cooling1 + '°F design&nbsp;·&nbsp;🔥 ' + c.heating99 + '°F</div>' +
-        elevChip +
-        propChip +
+      dashHead(r, c, e, p) +
+      kpiRow(r, c, e) +
+      '<div class="tile-groups">' +
+        tileGroup("The house", [envelopeTile(r, e), breakdownTile(r), roomsTile(), photosTile()]) +
+        tileGroup("The sale", [energyTile(), rebatesTile(), permitTile(r), sizingTile(r)]) +
       '</div>' +
-      '<div class="address-line">' + escapeHtml(shortAddr(state.geo.label)) + '</div>' +
+      dashBar() +
 
-      '<div class="load-grid">' +
-        loadCard("heat", "Heating", r.heating, "Design low", c.heating99 + "°F", heatIcon()) +
-        loadCard("cool", "Cooling", r.cooling, "A/C size", r.recommendedTons + " tons", coolIcon()) +
-      '</div>' +
+      // Every tool's full card, unchanged, each in a sheet its tile opens.
+      sheetHtml("sizing", sizingSheet(r, e, c)) +
+      sheetHtml("heating", heatingSheet(r, c)) +
+      sheetHtml("airflow", airflowSheet(r, e)) +
+      sheetHtml("breakdown", breakdownBody(r, c, e, qualityLabel)) +
+      sheetHtml("envelope", envelopeCard(r)) +
+      sheetHtml("photos", photosCard() + photoInsightsCard()) +
+      sheetHtml("permit", permitCard()) +
+      sheetHtml("rebates", rebateCard()) +
+      sheetHtml("energy", energyCard()) +
+      sheetHtml("rooms", roomCard()) +
+      sheetHtml("send", exportCard() + shareRow()) +
+      sheetHtml("adjust", adjustBlock(e, p));
 
-      '<div class="equip-card">' +
-        '<div class="badge">' + r.recommendedTons + '<small>TON A/C</small></div>' +
-        '<div class="equip-text"><b>Equipment plan</b>' +
-          '<div class="equip-rows">' +
-            equipRow("Cooling", r.recommendedTons + "-ton " + systemTypeLabel(e.systemType) + " (" + r.equipment.oversizePct + "% of load)") +
-            equipRow("Heating", fmt(r.equipment.furnaceOutput) + " BTU/h output furnace, or heat pump + backup") +
-            equipRow("Airflow", "≈ " + fmt(r.equipment.airflowCfm) + " CFM") +
-            equipRow("Density", fmt(r.sqftPerTon) + " ft²/ton") +
-          '</div>' +
-          '<div class="eq-alts">By system type: single-stage <b>' + r.sizing.single + 't</b> · two-stage <b>' + r.sizing.two + 't</b> · variable-capacity <b>' + r.sizing.variable + 't</b><span class="eq-alt-note">Variable systems modulate down to ~30–40%, so a nominal size above the load still runs efficiently. Fixed-capacity selection targets ACCA Manual S limits (90–115%) using the nearest half-ton step; for very small loads the closest available step can fall outside that band, which Manual S also allows.</span></div>' +
-          '<p>' + r.equipment.suggestion + '</p>' +
-          '<p class="eq-oversize-note">Larger than this? That\'s common: published Manual J case studies and real contractor-quote comparisons repeatedly show field-installed equipment sized 20–75% above the calculated load, usually from rule-of-thumb sizing (e.g. a flat 400–600 ft²/ton) rather than a load calc. The smaller, calculated number is typically the more accurate one — oversized equipment short-cycles, dehumidifies worse, and costs more up front and to run.</p>' +
-          '</div>' +
-      '</div>' +
-
-      jobTypeCard() +
-      hpCard(r, c) +
-      envelopeCard(r) +
-      photosCard() +
-      photoInsightsCard() +
-      permitCard() +
-      rebateCard() +
-
-      '<div class="actions">' +
-        '<button class="action-btn primary" id="reportBtn"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3a1 1 0 0 1 1-1h7l4 4v3"/><path d="M6 17H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-2"/><rect x="6" y="13" width="12" height="8" rx="1"/></svg>Generate report</button>' +
-        '<button class="action-btn" id="shareBtn"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg>Share</button>' +
-      '</div>' +
-
-      detailsBlock(r, c, e, qualityLabel) +
-      adjustBlock(e, p) +
-
-      finalRecommendationCard(r, e, c) +
-      exportCard() +
-      roomCard() +
-      energyCard();
+    // A re-render rebuilds every sheet closed. Remember which one was open and
+    // where it was scrolled, so finishing a background job never throws the
+    // rep out of the sheet they were working in.
+    var keepSheet = fresh ? null : openSheetId;
+    var keepScroll = 0;
+    if (keepSheet) {
+      var oldBody = document.querySelector("#ds-" + keepSheet + " .dsheet-body");
+      if (oldBody) keepScroll = oldBody.scrollTop;
+    }
 
     var el = $("#results");
     el.innerHTML = html;
@@ -507,11 +484,9 @@
     updateFreeNote();
     document.body.classList.add("has-results");
 
-    animateCounts();
+    if (fresh) animateCounts();
     wireAdjust();
     restoreInputDraft();
-    var ac = $("#adjustChip");
-    if (ac) ac.addEventListener("click", function () { var d = $("#adjustDetails"); if (d) { d.open = true; draftPanelOpen = true; d.scrollIntoView({ behavior: "smooth", block: "center" }); } });
     $("#reportBtn").addEventListener("click", function () { thinkThen("Building your report…", function () { generateReport({}); }); });
     $("#shareBtn").addEventListener("click", shareResult);
     wirePhotos();
@@ -524,19 +499,407 @@
     if (jobChange) jobChange.addEventListener("click", openJobSheet);
     wireRebates();
 
+    if (keepSheet && $("#ds-" + keepSheet)) {
+      openSheet(keepSheet, { still: true });
+      var newBody = document.querySelector("#ds-" + keepSheet + " .dsheet-body");
+      if (newBody) newBody.scrollTop = keepScroll;
+    } else if (keepSheet) {
+      closeSheet();
+    }
+
     saveActiveToHistory();
-    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    // Only a new calculation moves the page. Re-renders from a sheet, a job
+    // change or a finished search leave the dashboard exactly where it was.
+    if (fresh) el.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  function loadCard(kind, title, load, subLabel, subValue, icon) {
+  // ---------- Dashboard: the answer up front, every tool one tap away ----------
+  //
+  // The results used to be one long report: seventeen stacked sections, the
+  // recommendation about five phone screens down, the tonnage stated five
+  // times. Now the answer and each tool's headline sit on about one screen,
+  // and each tool's full card lives in a sheet that its tile opens.
+  //
+  // The cards themselves are unchanged — same markup, same IDs, same handlers.
+  // Every sheet is always in the DOM (just hidden), which is what lets every
+  // existing wire*() function and the saved-input paths work untouched.
+
+  var openSheetId = null;     // which sheet is open; UI state only, never saved
+  var sheetInHistory = false; // whether that sheet has an entry on the history stack
+  var freshRender = false;    // set by a new calculation: animate, scroll, close sheets
+
+  var SHEET_TITLES = {
+    sizing: "Sizing", heating: "Heating & balance point", airflow: "Airflow & return air",
+    breakdown: "Where the load comes from", envelope: "EnvelopeIQ™", photos: "PhotoScan AI",
+    permit: "PermitIQ™", rebates: "RebateIQ™", energy: "EnergyIQ™", rooms: "RoomIQ™",
+    send: "Send this job", adjust: "Fine-tune inputs"
+  };
+
+  function dashHead(r, c, e, p) {
+    var job = jobType();
+    var climate = c.source === "live"
+      ? '<span class="dh-pill live"><span class="pulse"></span>' + fmt(c.hours) + ' hrs on-site weather</span>'
+      : '<span class="dh-pill' + ((c.distance || 0) > 75 ? " warn" : "") + '">' + escapeHtml(c.city) + ' station' + (c.distance ? ' · ' + fmt(c.distance) + ' mi' : '') + '</span>';
+    var elev = (c.elevFt || 0) > 1500 ? '<span class="dh-pill">' + fmt(c.elevFt) + ' ft · air ×' + r.inputs.acf + '</span>' : "";
+    // An estimated floor area is the single biggest swing in the answer, so it
+    // stays visible and one tap from the field that fixes it.
+    var area = p.source === "fetched"
+      ? '<span class="dh-pill ok">' + fmt(e.area) + ' ft² · records</span>'
+      : '<button type="button" class="dh-pill warn tap" id="adjustChip" data-open="adjust">' + pencilIcon() + fmt(e.area) + ' ft² · estimated</button>';
     return '' +
-      '<div class="load-card ' + kind + '"><div class="glow"></div>' +
-        '<div class="load-head"><span class="ico">' + icon + '</span>' + title + '</div>' +
-        '<div class="load-btu"><span class="count" data-to="' + load.total + '">0</span><small>BTU/h</small></div>' +
-        '<div class="load-sub">' + fmt(load.range.low) + ' – ' + fmt(load.range.high) + ' expected</div>' +
-        '<div class="load-tons"><span>' + subLabel + '</span><b>' + subValue + '</b></div>' +
+      '<div class="dash-head">' +
+        '<div class="dh-addr">' + escapeHtml(shortAddr(state.geo.label)) + '</div>' +
+        '<div class="dh-job">' +
+          (job ? '<b>' + escapeHtml(job.label) + '</b>' : "") +
+          (job && job.ducted === false ? '<span class="job-tag">no duct losses</span>' : "") +
+          (job && job.needsLoad === false ? '<span class="job-tag warn">sized per room</span>' : "") +
+          '<button type="button" class="job-change" id="jobChangeBtn">Change</button>' +
+        '</div>' +
+        '<div class="dh-meta">' + climate + '<span class="dh-pill">' + c.cooling1 + '° / ' + c.heating99 + '° design</span>' + elev + area + '</div>' +
       '</div>';
   }
+
+  function kpiRow(r, c, e) {
+    var job = jobType();
+    var gasHeat = job && (job.fuel === "gas" || job.fuel === "dual-fuel");
+    var ra = r.returnAir;
+    var airSub = ra && ra.ok != null
+      ? (ra.ok ? "Return air adequate" : "Return looks undersized")
+      : Math.round(r.equipment.airflowCfm / r.recommendedTons) + " CFM per ton";
+    return '' +
+      '<div class="kpis">' +
+        kpi("cool", "sizing", coolIcon(), "Cooling",
+          r.recommendedTons + '<small>ton</small>',
+          '<span class="count" data-to="' + r.cooling.total + '">' + fmt(r.cooling.total) + '</span> BTU/h') +
+        kpi("heat", "heating", heatIcon(), "Heating",
+          '<span class="count" data-to="' + r.heating.total + '">' + fmt(r.heating.total) + '</span><small>BTU/h</small>',
+          gasHeat ? fmt(r.equipment.furnaceOutput) + " furnace output" : "Design low " + c.heating99 + "°F") +
+        kpi("air" + (ra && ra.ok === false ? " warn" : ""), "airflow", airflowIcon(), "Airflow",
+          fmt(r.equipment.airflowCfm) + '<small>CFM</small>', airSub) +
+        kpi("bp", "heating", hpIcon(), "Balance point",
+          r.heatpump.balanceF + '<small>°F</small>',
+          r.heatpump.auxBtu > 500 ? r.heatpump.auxKw + " kW backup at " + c.heating99 + "°F" : "No backup heat needed") +
+      '</div>';
+  }
+  function kpi(kind, open, icon, label, val, sub) {
+    var id = kind.split(" ")[0];
+    return '<button type="button" class="kpi ' + kind + '" id="kpi-' + id + '" data-open="' + open + '">' +
+      '<span class="kpi-top"><span class="kpi-ico">' + icon + '</span>' + label + '<span class="tile-go" aria-hidden="true">›</span></span>' +
+      '<span class="kpi-val">' + val + '</span>' +
+      '<span class="kpi-sub">' + sub + '</span>' +
+    '</button>';
+  }
+
+  function tileGroup(label, tiles) {
+    return '<section class="tile-group"><h3 class="tg-label">' + label + '</h3><div class="tiles">' + tiles.join("") + '</div></section>';
+  }
+  // head and sub are trusted markup built here; anything that came from the
+  // user or a search is escaped before it reaches them.
+  function tile(t) {
+    return '<button type="button" class="tile' + (t.tone ? " " + t.tone : "") + (t.locked ? " locked" : "") + '" id="tile-' + t.id + '" data-open="' + t.id + '">' +
+      '<span class="tile-top"><span class="tile-ico">' + t.icon + '</span><span class="tile-label">' + t.label + '</span>' +
+        (t.locked ? '<span class="tile-pro">PRO</span>' : '<span class="tile-go" aria-hidden="true">›</span>') + '</span>' +
+      '<span class="tile-head">' + t.head + '</span>' +
+      (t.sub ? '<span class="tile-sub">' + t.sub + '</span>' : "") +
+    '</button>';
+  }
+  function lockedTile(id, label, icon) {
+    return tile({ id: id, label: label, icon: icon, head: "Pro tool", sub: planTier() === 0 ? "Free in the trial" : "Upgrade to unlock", locked: true });
+  }
+
+  function envelopeTile(r, e) {
+    var env = r.envelope;
+    var assumed = env ? ["atticR", "windowU", "windowSHGC", "ach"].filter(function (k) { return env.source[k] !== "entered"; }).length : 4;
+    var basis = env && env.basis === "vintage-zone";
+    return tile({
+      id: "envelope", label: "EnvelopeIQ", icon: envelopeIcon(),
+      head: assumed === 0 ? "All measured" : assumed + " of 4 assumed",
+      sub: assumed === 0 ? "R-" + env.atticR + " · " + env.ach.toFixed(2) + " ACH" : basis ? "Code-era " + env.yearBuilt + " · zone " + env.zone : "Add the year built",
+      // Tier defaults are the weakest basis the app has; say so in colour.
+      tone: assumed === 0 ? "good" : basis ? "" : "warn"
+    });
+  }
+
+  function breakdownTile(r) {
+    var cb = r.cooling.breakdown;
+    var parts = [["Walls &amp; roof", cb.conduction], ["Sun on glass", cb.solar], ["People", cb.people], ["Appliances", cb.internal], ["Air leaks", cb.infiltration]];
+    var sum = parts.reduce(function (a, x) { return a + x[1]; }, 0) || 1;
+    var top = parts.reduce(function (a, x) { return x[1] > a[1] ? x : a; });
+    return tile({ id: "breakdown", label: "Load breakdown", icon: barsIcon(), head: top[0] + " " + Math.round(top[1] / sum * 100) + "%", sub: "Biggest share of cooling" });
+  }
+
+  function roomsTile() {
+    if (planTier() < 2) return lockedTile("rooms", "RoomIQ", roomIcon());
+    var rooms = roomsState(), rr = state.roomResult;
+    if (rr && rr.rooms.length) {
+      var starved = rr.rooms.filter(function (x) { return x.actualCfm != null && x.actualCfm < x.requiredCfm * 0.8; }).length;
+      var flagged = rr.rooms.filter(function (x) { return x.worst === "severe" || x.worst === "warn"; }).length;
+      return tile({
+        id: "rooms", label: "RoomIQ", icon: roomIcon(),
+        head: starved ? starved + " short of air" : flagged ? flagged + " flagged" : "No problems",
+        sub: rr.rooms.length + " room" + (rr.rooms.length === 1 ? "" : "s") + " diagnosed",
+        tone: starved ? "bad" : flagged ? "warn" : "good"
+      });
+    }
+    return tile({
+      id: "rooms", label: "RoomIQ", icon: roomIcon(),
+      head: rooms.length ? rooms.length + " room" + (rooms.length === 1 ? "" : "s") : "Add rooms",
+      sub: rooms.length ? "Tap to diagnose" : "Find the starved room"
+    });
+  }
+
+  function photosTile() {
+    if (planTier() < 2) return lockedTile("photos", "PhotoScan", cameraIcon());
+    var n = state.photos.length, pa = state.photoAI;
+    var applied = pa ? Object.keys(pa.applied || {}).length : 0;
+    return tile({
+      id: "photos", label: "PhotoScan", icon: cameraIcon(),
+      head: state.photoBusy ? "Reading…" : n ? n + " photo" + (n === 1 ? "" : "s") : "No photos",
+      sub: pa ? applied + " finding" + (applied === 1 ? "" : "s") + " applied" : n ? "Tap to analyze" : "Snap the house",
+      tone: pa && applied ? "good" : ""
+    });
+  }
+
+  function energyTile() {
+    if (planTier() < 2) return lockedTile("energy", "EnergyIQ", energyIcon());
+    var er = state.energyResult;
+    if (er && er.existing) {
+      var rs = er.existing.rightSize;
+      return tile({
+        id: "energy", label: "EnergyIQ", icon: energyIcon(),
+        head: money(er.existing.energy.totalCost) + "/yr now",
+        sub: rs ? rs.pct + "% of load · " + rs.verdict : "Their current unit",
+        tone: rs ? (rs.verdict === "right-sized" ? "good" : rs.verdict === "undersized" ? "warn" : "bad") : ""
+      });
+    }
+    return tile({ id: "energy", label: "EnergyIQ", icon: energyIcon(), head: "Add their unit", sub: "Cost to run · right size?" });
+  }
+
+  function rebatesTile() {
+    if (planTier() < 2) return lockedTile("rebates", "RebateIQ", rebateIcon());
+    var rb = state.rebates;
+    if (state.rebateBusy) return tile({ id: "rebates", label: "RebateIQ", icon: rebateIcon(), head: "Searching…", sub: "20–60 seconds" });
+    if (rb) {
+      var n = rb.programs.length;
+      var stale = rb.jobId && rb.jobId !== jobTypeId();
+      return tile({
+        id: "rebates", label: "RebateIQ", icon: rebateIcon(),
+        head: !n ? "None confirmed" : rb.totals.capped > 0 ? money(rb.totals.capped) : n + " program" + (n === 1 ? "" : "s"),
+        // Programs are measure-specific, so a list found for another job must
+        // not read as current.
+        sub: stale ? "Job changed — search again" : !n ? "For this address, today" : rb.totals.capped > 0 ? n + " program" + (n === 1 ? "" : "s") + " found" : "Amounts vary",
+        tone: stale ? "warn" : n ? "good" : ""
+      });
+    }
+    if (state.rebateError) return tile({ id: "rebates", label: "RebateIQ", icon: rebateIcon(), head: "Search failed", sub: "Tap to try again", tone: "warn" });
+    return tile({ id: "rebates", label: "RebateIQ", icon: rebateIcon(), head: "Find rebates", sub: "Live search, this address" });
+  }
+
+  function permitTile(r) {
+    if (planTier() < 2) return lockedTile("permit", "PermitIQ", shieldIcon());
+    var pd = window.PermitData, g = state.geo || {};
+    var code = pd.stateCode(g.state);
+    var rows = pd.efficiency(code || "").rows;
+    var job = jobType();
+    function row(re) { return rows.filter(function (x) { return re.test(x.k); })[0]; }
+    function bare(v) { return String(v || "").replace(/\s*(federal\s+)?minimum$/i, ""); }
+    var head, sub;
+    if (job && job.cooling === false && job.heating !== false && job.fuel === "gas") {
+      head = bare((row(/furnace/i) || {}).v); sub = "Furnace minimum";
+    } else if (job && (job.fuel === "heat-pump" || job.fuel === "geothermal")) {
+      var hp = bare((row(/heat pump/i) || {}).v).split(" · ");
+      head = hp[1] || hp[0]; sub = (hp[1] ? hp[0] + " · " : "") + "heat pump min.";
+    } else {
+      head = bare(((r.recommendedTons * 12000 >= 45000 ? row(/≥\s*45/) : row(/<\s*45/)) || {}).v);
+      sub = "A/C minimum" + (code ? " · " + code : "");
+    }
+    return tile({ id: "permit", label: "PermitIQ", icon: shieldIcon(), head: head || "Requirements", sub: code ? sub : "State not confirmed", tone: code ? "" : "warn" });
+  }
+
+  // The three stage families side by side, with the one this job belongs to
+  // lit — the comparison a rep talks through, without opening anything.
+  function sizingTile(r) {
+    var job = jobType();
+    var fam = job ? job.systemType : null;
+    function trio(label, tons, key) {
+      return '<span class="trio' + (fam === key ? " on" : "") + '"><b>' + tons + '</b><em>' + label + '</em></span>';
+    }
+    var fit = r.equipment.manualSFit;
+    return tile({
+      id: "sizing", label: "System options", icon: slidersIcon(),
+      head: '<span class="tile-trio">' + trio("1-stage", r.sizing.single, "single") + trio("2-stage", r.sizing.two, "two") + trio("variable", r.sizing.variable, "variable") + '</span>',
+      sub: fit ? (fit.inBand ? "Tons · within Manual S" : "Closest size — see why") : "Tons by system type",
+      tone: fit && !fit.inBand ? "warn" : ""
+    });
+  }
+
+  function dashBar() {
+    return '' +
+      '<div class="dash-bar"><div class="db-inner">' +
+        '<button type="button" class="db-btn primary" id="reportBtn">' + printIcon() + 'Report</button>' +
+        '<button type="button" class="db-btn" id="sendBtn" data-open="send">' + exportIcon() + 'Send</button>' +
+        '<button type="button" class="db-btn" id="adjustBtn" data-open="adjust">' + slidersIcon() + 'Adjust</button>' +
+      '</div></div>';
+  }
+
+  function sheetHtml(id, body) {
+    return '' +
+      '<div class="dsheet" id="ds-' + id + '" data-sheet="' + id + '" role="dialog" aria-modal="true" aria-label="' + escapeAttr(SHEET_TITLES[id]) + '">' +
+        '<div class="dsheet-panel">' +
+          '<div class="dsheet-bar"><span class="dsheet-grab" aria-hidden="true"></span>' +
+            '<b class="dsheet-title">' + SHEET_TITLES[id] + '</b>' +
+            '<button type="button" class="dsheet-x" data-close aria-label="Close">' + closeIcon() + '</button>' +
+          '</div>' +
+          '<div class="dsheet-body">' + body + '</div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  function openSheet(id, opts) {
+    var el = $("#ds-" + id);
+    if (!el) return;
+    var still = !!(opts && opts.still);
+    document.querySelectorAll(".dsheet.open").forEach(function (s) { if (s !== el) s.classList.remove("open", "still"); });
+    el.classList.toggle("still", still);   // re-opened after a re-render: no slide-in
+    el.classList.add("open");
+    openSheetId = id;
+    document.body.classList.add("ds-open");
+    if (still) return;
+    // Phones close sheets with the Back button. Without a history entry for
+    // the sheet, Back would leave the app and throw the calculation away.
+    try {
+      if (sheetInHistory) history.replaceState({ lmpSheet: id }, "");
+      else { history.pushState({ lmpSheet: id }, ""); sheetInHistory = true; }
+    } catch (e) {}
+    animateBarsIn(el);
+    var x = el.querySelector(".dsheet-x");
+    if (x) try { x.focus({ preventScroll: true }); } catch (e) {}
+  }
+
+  function closeSheet(fromHistory) {
+    if (openSheetId) {
+      var el = $("#ds-" + openSheetId);
+      if (el) el.classList.remove("open", "still");
+      var tileBtn = document.querySelector('[data-open="' + openSheetId + '"]');
+      openSheetId = null;
+      document.body.classList.remove("ds-open");
+      if (tileBtn) try { tileBtn.focus({ preventScroll: true }); } catch (e) {}
+    }
+    if (sheetInHistory && !fromHistory) {
+      sheetInHistory = false;
+      try { history.back(); } catch (e) {}
+    } else if (fromHistory) {
+      sheetInHistory = false;
+    }
+  }
+
+  // Bars inside a sheet were sized while it was hidden; replay the fill so
+  // opening the sheet shows them grow, as they did on the old long page.
+  function animateBarsIn(root) {
+    var bars = root.querySelectorAll(".bar-fill, .rq-bar-fill");
+    if (!bars.length) return;
+    bars.forEach(function (b) { b.style.transition = "none"; b.style.width = "0%"; });
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        bars.forEach(function (b) { b.style.transition = ""; b.style.width = (b.getAttribute("data-w") || 0) + "%"; });
+      });
+    });
+  }
+
+  // Wired once: #results survives every re-render of its contents, so the
+  // delegated listeners never need re-attaching.
+  function wireDashboard() {
+    var root = $("#results");
+    if (!root) return;
+    root.addEventListener("click", function (ev) {
+      var t = ev.target;
+      if (!t || !t.closest) return;
+      if (t.closest("[data-close]")) { closeSheet(); return; }
+      var opener = t.closest("[data-open]");
+      if (opener && root.contains(opener)) { openSheet(opener.getAttribute("data-open")); return; }
+      // A tap on the dimmed backdrop, outside the panel, closes the sheet.
+      if (t.classList && t.classList.contains("dsheet")) closeSheet();
+    });
+    document.addEventListener("keydown", function (ev) {
+      // The job picker and Settings sit above a sheet; let them have Escape.
+      if (ev.key === "Escape" && openSheetId && !$("#settingsRoot").innerHTML) closeSheet();
+    });
+    window.addEventListener("popstate", function (ev) {
+      var want = ev.state && ev.state.lmpSheet;
+      if (!want && openSheetId) closeSheet(true);
+      else if (!want) sheetInHistory = false;
+    });
+    // A reload keeps history.state. There are no results after a reload, so a
+    // leftover sheet entry would only cost the rep an extra Back press.
+    try { if (history.state && history.state.lmpSheet) history.replaceState(null, ""); } catch (e) {}
+  }
+
+  // ---------- Sheet bodies built here (the rest are the existing cards) ----------
+
+  function sizingSheet(r, e, c) {
+    return '' +
+      finalRecommendationCard(r, e, c) +
+      '<div class="ds-sec">Equipment plan</div>' +
+      '<div class="equip-rows">' +
+        equipRow("Cooling", r.recommendedTons + "-ton " + systemTypeLabel(e.systemType) + " (" + r.equipment.oversizePct + "% of load)") +
+        equipRow("Heating", fmt(r.equipment.furnaceOutput) + " BTU/h output furnace, or heat pump + backup") +
+        equipRow("Airflow", "≈ " + fmt(r.equipment.airflowCfm) + " CFM") +
+        equipRow("Density", fmt(r.sqftPerTon) + " ft²/ton") +
+      '</div>' +
+      '<p class="ds-note">' + r.equipment.suggestion + '</p>' +
+      sizingWhy(r, c);
+  }
+
+  // The reasoning behind the sizes, kept but folded: it answers "why not
+  // bigger?" when the customer asks, and is noise when they don't.
+  function sizingWhy(r, c) {
+    var hp = r.heatpump;
+    var hpNote = hp.auxBtu > 500
+      ? 'covers this home down to about <b>' + hp.balanceF + '°F</b>; below that, plan on ≈<b>' + hp.auxKw + ' kW</b> (' + fmt(hp.auxBtu) + ' BTU/h) of backup heat at the ' + c.heating99 + '°F design low.'
+      : 'covers this home alone all the way to the ' + c.heating99 + '°F design low — no backup heat needed.';
+    return '' +
+      '<details class="why"><summary>Why these sizes?' + caretIcon() + '</summary><div class="why-body">' +
+        '<p>Fixed-capacity selection targets ACCA Manual S limits (90–115% of load for a typical climate) using the nearest half-ton step; for very small loads the closest available step can fall outside that band, which Manual S also allows.</p>' +
+        '<p>Variable-capacity systems modulate continuously, and their maximum output typically exceeds their nominal rating, so they don\'t need the fixed-capacity oversize cushion — they\'re selected to the nearest half-ton step, which is often a half-ton smaller than single/two-stage equipment for the same load and never larger. Every size stays at or above Manual S\'s 90%-of-load floor.</p>' +
+        '<p>*A heat pump uses the same cooling-capacity sizing rule as an A/C — size it for the stage type, then check the heating side: this ' + r.recommendedTons + '-ton heat pump ' + hpNote + '</p>' +
+        '<p>Larger than what\'s installed now? That\'s common: published Manual J case studies and contractor-quote comparisons repeatedly show field-installed equipment sized 20–75% above the calculated load, usually from rule-of-thumb sizing (a flat 400–600 ft²/ton) rather than a load calc. Oversized equipment short-cycles, dehumidifies worse, and costs more up front and to run.</p>' +
+      '</div></details>';
+  }
+
+  function heatingSheet(r, c) {
+    return '' +
+      '<div class="equip-rows">' +
+        equipRow("Heating load", fmt(r.heating.total) + " BTU/h") +
+        equipRow("Expected range", fmt(r.heating.range.low) + " – " + fmt(r.heating.range.high) + " BTU/h") +
+        equipRow("Furnace output", fmt(r.equipment.furnaceOutput) + " BTU/h") +
+        equipRow("Design low", c.heating99 + "°F") +
+      '</div>' +
+      hpCard(r, c);
+  }
+
+  function airflowSheet(r, e) {
+    return '' +
+      '<div class="equip-rows">' +
+        equipRow("Required airflow", "≈ " + fmt(r.equipment.airflowCfm) + " CFM") +
+        equipRow("Per ton", Math.round(r.equipment.airflowCfm / r.recommendedTons) + " CFM") +
+        equipRow("Return opening needed", "≈ " + fmt(Math.round(r.recommendedTons * 144)) + " sq in") +
+      '</div>' +
+      returnAirInputHtml(e) +
+      returnAirCard(e);
+  }
+
+  function shareRow() {
+    return '<div class="share-row"><button type="button" class="ex-btn" id="shareBtn">' + shareIcon() + 'Share a quick summary</button></div>';
+  }
+
+  function pencilIcon() { return '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>'; }
+  function airflowIcon() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 8h11a3 3 0 1 0-3-3"/><path d="M3 12h15a3 3 0 1 1-3 3"/><path d="M3 16h7"/></svg>'; }
+  function barsIcon() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>'; }
+  function slidersIcon() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>'; }
+  function printIcon() { return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3a1 1 0 0 1 1-1h7l4 4v3"/><path d="M6 17H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-2"/><rect x="6" y="13" width="12" height="8" rx="1"/></svg>'; }
+  function shareIcon() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg>'; }
+  function closeIcon() { return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>'; }
+  function caretIcon() { return '<svg class="caret" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>'; }
 
   function equipRow(k, v) { return '<div class="eq-row"><span>' + k + '</span><b>' + v + '</b></div>'; }
   function systemTypeLabel(t) { return { single: "single-stage A/C or HP", two: "two-stage A/C or HP", variable: "variable-capacity system" }[t] || "system"; }
@@ -544,7 +907,18 @@
   // ---------- Site photos (Pro feature: attach to report / permit package,
   // and optionally feed the AI photo analysis) ----------
   function photosCard() {
-    if (planTier() < 2) return ""; // upsell handled by the PermitIQ card below
+    if (planTier() < 2) {
+      var cta = planTier() === 0
+        ? '<a class="permit-cta" href="auth.html#signup">Start free trial — unlock PhotoScan</a>'
+        : '<a class="permit-cta" href="index.html#pricing">Upgrade to Pro — unlock PhotoScan</a>';
+      return '' +
+        '<div class="permit-card locked">' +
+          '<div class="hp-head"><span class="ico gold">' + lockIcon() + '</span>PhotoScan AI — photos that tune the load<span class="permit-badge">PRO</span></div>' +
+          '<p class="hp-text">Snap the walls, windows, attic and the old unit. The AI reads the construction and tightens the load on the spot, reads the data plate into EnergyIQ, and the photos ride along in the report and permit package.</p>' +
+          '<div class="permit-teaser"><div class="tz-row"></div><div class="tz-row w70"></div><div class="tz-row w85"></div><div class="tz-row w60"></div></div>' +
+          cta +
+        '</div>';
+    }
     var thumbs = state.photos.map(function (p, i) {
       return '<div class="photo-th"><img src="' + p.src + '" alt="site photo ' + (i + 1) + '"/><button class="photo-x" data-x="' + i + '" aria-label="Remove">×</button></div>';
     }).join("");
@@ -931,10 +1305,6 @@
   // variable-capacity system can legitimately come in smaller since it
   // modulates instead of needing Manual S's fixed-capacity oversize cushion.
   function finalRecommendationCard(r, e, c) {
-    var hp = r.heatpump;
-    var hpNote = hp.auxBtu > 500
-      ? 'covers this home down to about <b>' + hp.balanceF + '°F</b>; below that, plan on ≈<b>' + hp.auxKw + ' kW</b> (' + fmt(hp.auxBtu) + ' BTU/h) of backup heat at the ' + c.heating99 + '°F design low.'
-      : 'covers this home alone all the way to the ' + c.heating99 + '°F design low — no backup heat needed.';
     /*
      * The four rows below are four different right answers, and which one is
      * THE answer depends entirely on what is being installed. Now that the job
@@ -972,9 +1342,6 @@
         '</div>' +
         manualSFitNote(r) +
         shrNote(r) +
-        '<p class="final-rec-foot">Variable-capacity systems modulate continuously, and their maximum output typically exceeds their nominal rating, so they don\'t need the fixed-capacity oversize cushion — they\'re selected to the nearest half-ton step, which is often a half-ton smaller than single/two-stage equipment for the same load and never larger. Every size above stays at or above Manual S\'s 90%-of-load floor. *A heat pump uses the same cooling-capacity sizing rule as an A/C — size it for the stage type above, then check the heating side: this ' + r.recommendedTons + '-ton heat pump ' + hpNote + '</p>' +
-        returnAirInputHtml(e) +
-        returnAirCard(e) +
       '</div>';
   }
 
@@ -1087,7 +1454,7 @@
   }
   function returnAirIcon() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h13"/><path d="M12 7l5 5-5 5"/><path d="M21 5v14"/></svg>'; }
 
-  function detailsBlock(r, c, e, qualityLabel) {
+  function breakdownBody(r, c, e, qualityLabel) {
     var cb = r.cooling.breakdown;
     var max = Math.max(cb.conduction, cb.solar, cb.people, cb.internal, cb.infiltration, 1);
     function bar(label, val) {
@@ -1095,7 +1462,11 @@
         '<div class="bar-track"><div class="bar-fill" data-w="' + Math.round(val / max * 100) + '"></div></div></div>';
     }
     return '' +
-      '<details class="details"><summary>Cooling load breakdown<svg class="caret" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></summary>' +
+      '<div class="equip-rows">' +
+        equipRow("Cooling load", fmt(r.cooling.total) + " BTU/h · expected " + fmt(r.cooling.range.low) + "–" + fmt(r.cooling.range.high)) +
+        equipRow("Heating load", fmt(r.heating.total) + " BTU/h · expected " + fmt(r.heating.range.low) + "–" + fmt(r.heating.range.high)) +
+      '</div>' +
+      '<div class="ds-sec">Cooling load, by source</div>' +
         '<div class="details-body">' +
           bar("Walls, roof &amp; windows", cb.conduction) +
           bar("Solar through glass", cb.solar) +
@@ -1120,8 +1491,7 @@
             (e.ductType ? kv("Duct location", ductTypeLabel(e.ductType)) : "") +
             (e.ductType !== "ductless" && e.ductCondition ? kv("Duct condition", e.ductCondition === "sealed" ? "Sealed &amp; insulated" : "Unsealed / uninsulated") : "") +
           '</div>' +
-        '</div>' +
-      '</details>';
+        '</div>';
   }
 
   function adjustBlock(e, p) {
@@ -1141,7 +1511,7 @@
       return fallback;
     }
     return '' +
-      '<details class="details" id="adjustDetails"><summary>Fine-tune inputs<svg class="caret" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></summary>' +
+      '<div id="adjustDetails">' +
         '<div class="details-body adjust">' +
           (p.source === "estimate" ? '<p class="note" style="text-align:left;margin:2px 2px 4px">We couldn\'t auto-pull this home\'s data, so these start from typical values. Adjust for an accurate result.</p>' : '') +
           '<label>Conditioned floor area (ft²)</label>' +
@@ -1213,10 +1583,10 @@
                 opt("sealed", "Sealed &amp; insulated", e.ductCondition) + opt("unsealed", "Unsealed / uninsulated", e.ductCondition) +
               '</select></div>' +
           '</div>' +
-          '<p class="note" style="text-align:left;margin:10px 2px 0">Return duct/grille sizing has its own check at the bottom of the page — it\'s a separate, instant check that doesn\'t need a full recalculate.</p>' +
+          '<p class="note" style="text-align:left;margin:10px 2px 0">Return duct/grille sizing has its own instant check under <b>Airflow</b> on the dashboard — it doesn\'t need a recalculate.</p>' +
           '<button class="recalc" id="recalcBtn">Recalculate</button>' +
         '</div>' +
-      '</details>';
+      '</div>';
   }
   function segBtn(val, label, cur) { return '<button data-q="' + val + '" class="' + (cur === val ? "on" : "") + '">' + label + '</button>'; }
   function opt(val, label, cur) { return '<option value="' + val + '"' + (cur === val ? " selected" : "") + '>' + label + '</option>'; }
@@ -1251,12 +1621,12 @@
    * the result: the page still looks finished.
    *
    * Every edit inside the fine-tune panel is therefore stashed by element id
-   * and written back after each render, along with the panel's open state and
-   * the lit construction-tier button. The stash is dropped when a new
-   * calculation starts, because it belongs to the old house.
+   * and written back after each render, along with the lit construction-tier
+   * button. (The panel's sheet stays open across re-renders on its own.) The
+   * stash is dropped when a new calculation starts, because it belongs to the
+   * old house.
    */
   var inputDraft = {};
-  var draftPanelOpen = false;
 
   function draftScope(el) {
     return el && el.id && el.closest && el.closest("#adjustDetails") ? el : null;
@@ -1265,10 +1635,8 @@
     var el = draftScope(ev.target);
     if (el) inputDraft[el.id] = el.value;
   }
-  function clearInputDraft() { inputDraft = {}; draftPanelOpen = false; }
+  function clearInputDraft() { inputDraft = {}; }
   function restoreInputDraft() {
-    var panel = $("#adjustDetails");
-    if (panel && draftPanelOpen) panel.open = true;
     Object.keys(inputDraft).forEach(function (id) {
       var el = $("#" + id);
       // Only inside the panel: an id reused elsewhere must not be written to.
@@ -1291,10 +1659,6 @@
     root.addEventListener("click", function (ev) {
       var q = ev.target.closest && ev.target.closest("#segQuality button[data-q]");
       if (q) inputDraft.__quality = q.getAttribute("data-q");
-      // <details> toggles after the click event, so read the real state next tick
-      // rather than guessing the inverse of the current one.
-      var sum = ev.target.closest && ev.target.closest("#adjustDetails > summary");
-      if (sum) setTimeout(function () { var d = $("#adjustDetails"); draftPanelOpen = !!(d && d.open); }, 0);
     });
   }
 
@@ -1789,6 +2153,11 @@
         rm.overUnconditioned = chk("rqUnder");
       });
     }
+    var form = add.closest(".rq-form");
+    if (form) {
+      form.addEventListener("input", readRooms);
+      form.addEventListener("change", readRooms);
+    }
     add.addEventListener("click", function () {
       readRooms();   // never lose what's typed when another row is added
       var rooms = roomsState();
@@ -1979,6 +2348,9 @@
       var t = JT.get(id);
       return t ? '<button type="button" class="job-chip' + (id === cur ? " on" : "") + '" data-job="' + id + '">' + escapeHtml(t.short) + '</button>' : "";
     }).join("") + '<button type="button" class="job-chip more" id="jobMoreBtn">All job types…</button>';
+    // The chips sit in one swipeable row, so the chosen one may be off-screen.
+    var row = $("#jobChips"), on = row.querySelector(".job-chip.on");
+    if (on) row.scrollLeft = Math.max(0, on.offsetLeft - row.offsetLeft - 16);
 
     var t = JT.get(cur);
     $("#jobChosen").innerHTML = t
@@ -2094,19 +2466,6 @@
     renderJobPicker();
   }
 
-  // The chosen job, shown with the results so the number on screen is never
-  // read without the job it was calculated for.
-  function jobTypeCard() {
-    var t = jobType();
-    if (!t) return "";
-    return '<div class="job-banner">' +
-      '<span class="job-banner-k">Job</span>' +
-      '<b>' + escapeHtml(t.label) + '</b>' +
-      (t.ducted === false ? '<span class="job-tag">no duct losses</span>' : "") +
-      (t.needsLoad === false ? '<span class="job-tag warn">sized per room, not whole-house</span>' : "") +
-      '<button type="button" class="job-change" id="jobChangeBtn">Change</button>' +
-      '</div>';
-  }
 
   // Marks the one sizing family the chosen job actually belongs to, so the
   // printed table reads as an answer with alternates rather than four
@@ -2545,6 +2904,9 @@
     state.photos = []; state.photoAI = null; state.photoBusy = false;
     $("#address").value = j.address;
     clearError();
+    clearInputDraft();
+    closeSheet();
+    freshRender = true;
     thinkThen("Reopening this job…", function () {
       compute();
       render();
@@ -2933,7 +3295,18 @@
   function clearError() { $("#errorBox").innerHTML = ""; }
   function escapeHtml(s) { return String(s).replace(/[&<>"']/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]; }); }
   function escapeAttr(s) { return escapeHtml(s); }
-  function shortAddr(label) { return label.split(",").slice(0, 4).join(", "); }
+  function shortAddr(label) {
+    // Nominatim writes "2100, Westheimer Road, …": split parts keep their
+    // leading space (which doubled up when re-joined) and the house number
+    // stands alone. Trim, and fold the number into its street.
+    var parts = String(label || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+    var folded = false;
+    for (var i = 0; i < parts.length - 1 && i < 2; i++) {
+      // "Willis Tower, 233, South Wacker Drive" has the number second.
+      if (/^\d+[a-z]?$/i.test(parts[i])) { parts.splice(i, 2, parts[i] + " " + parts[i + 1]); folded = true; break; }
+    }
+    return parts.slice(0, folded ? 3 : 4).join(", ");
+  }
   function roundTo(n, step) { return Math.round(n / step) * step; }
 
   function heatIcon() { return '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2s5 4 5 9a5 5 0 0 1-10 0c0-2 1-3 1-3s0 2 1.5 2S12 6 12 2z"/></svg>'; }
@@ -3137,6 +3510,7 @@
     loadLastJobType();
     wireJobPicker();
     wireInputDraft();
+    wireDashboard();
     updateFreeNote();
     $("#calcBtn").addEventListener("click", function () {
       var a = $("#address").value.trim();

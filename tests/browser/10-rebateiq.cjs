@@ -62,6 +62,21 @@ function providerBody(payload) {
   };
 }
 
+// The results are a dashboard: each tool's card lives in a sheet its tile
+// opens, and stays open across the re-render its own buttons cause.
+async function openSheet(page, id) {
+  if (await page.$(`#ds-${id}.open`)) return;
+  await closeSheet(page);
+  await page.click(`[data-open="${id}"]`);
+  await page.waitForSelector(`#ds-${id}.open`, { timeout: 5000 });
+}
+async function closeSheet(page) {
+  const x = await page.$(".dsheet.open .dsheet-x");
+  if (!x) return;
+  await x.click();
+  await page.waitForSelector(".dsheet.open", { state: "detached", timeout: 5000 });
+}
+
 async function runCalc(page) {
   await page.fill("#address", "2100 Westheimer Rd, Houston, TX");
   await page.waitForTimeout(1800);
@@ -102,7 +117,9 @@ async function runCalc(page) {
     await page.goto(`${BASE}/app.html`, { waitUntil: "load" });
     await runCalc(page);
 
-    ok("RebateIQ card renders for a Pro user", await page.$("#rebateCard") !== null);
+    ok("the RebateIQ tile offers the search before it is run", /Find rebates/.test(await page.evaluate(() => document.querySelector("#tile-rebates")?.innerText || "")));
+    await openSheet(page, "rebates");
+    ok("RebateIQ card renders for a Pro user", await page.$("#ds-rebates.open #rebateCard") !== null);
     ok("it explains itself before it is run", /Searches the live web/.test(await page.evaluate(() => document.querySelector("#rebateCard")?.innerText || "")));
 
     await page.click("#rebateBtn");
@@ -137,7 +154,12 @@ async function runCalc(page) {
     // must NOT have a one-tap route into a customer price.
     ok("there is no one-tap 'apply to the proposal' shortcut any more", await page.$("#rebateUseBtn") === null);
 
+    ok("the sheet stayed open through the search", await page.$("#ds-rebates.open") !== null);
+    const tileText = await page.evaluate(() => document.querySelector("#tile-rebates")?.innerText || "");
+    ok("the dashboard tile carries the total and the count", /\$3,200/.test(tileText) && /3 programs found/.test(tileText), tileText.replace(/\n/g, " · "));
+
     // Printed appendix
+    await closeSheet(page);
     await page.click("#reportBtn");
     await page.waitForTimeout(1000);
     const rep = await page.evaluate(() => document.querySelector("#reportRoot")?.textContent || "");
@@ -170,11 +192,13 @@ async function runCalc(page) {
     await page.route("**api.anthropic.com/**", route => route.fulfill({ status: 401, contentType: "application/json", body: "{}" }));
     await page.goto(`${BASE}/app.html`, { waitUntil: "load" });
     await runCalc(page);
+    await openSheet(page, "rebates");
     await page.click("#rebateBtn");
     await page.waitForSelector(".rb-error", { timeout: 20000 });
     ok("a rejected key is shown in the card, not swallowed", /rejected/i.test(await page.evaluate(() => document.querySelector(".rb-error")?.textContent || "")));
     ok("the button is usable again after a failure", await page.$eval("#rebateBtn", el => !el.disabled));
     ok("no overlay is left stuck up", !(await page.evaluate(() => !!document.querySelector(".thinking.on"))));
+    ok("the dashboard tile says the search failed", /Search failed/.test(await page.evaluate(() => document.querySelector("#tile-rebates")?.innerText || "")));
     await ctx.close();
   }
 
@@ -188,6 +212,7 @@ async function runCalc(page) {
     await page.route("**epqs.nationalmap.gov/**", relay);
     await page.goto(`${BASE}/app.html`, { waitUntil: "load" });
     await runCalc(page);
+    await openSheet(page, "rebates");
     await page.click("#rebateBtn");
     await page.waitForTimeout(700);
     ok("with no API key it opens Settings rather than failing silently", await page.$("#aiProvider") !== null);
@@ -200,8 +225,11 @@ async function runCalc(page) {
     await p2.route("**epqs.nationalmap.gov/**", relay);
     await p2.goto(`${BASE}/app.html`, { waitUntil: "load" });
     await runCalc(p2);
-    const locked = await p2.evaluate(() => Array.from(document.querySelectorAll(".permit-card.locked")).map(e => e.innerText.slice(0, 30)));
-    ok("a guest sees the locked RebateIQ teaser", locked.some(t => /RebateIQ/.test(t)), locked.join(" | "));
+    const tile = await p2.evaluate(() => { const t = document.querySelector("#tile-rebates"); return { locked: !!(t && t.classList.contains("locked")), text: t ? t.innerText : "" }; });
+    ok("a guest sees RebateIQ as a locked Pro tile", tile.locked && /PRO/.test(tile.text), tile.text.replace(/\n/g, " · "));
+    await openSheet(p2, "rebates");
+    const teaser = await p2.evaluate(() => document.querySelector("#ds-rebates.open .permit-card.locked")?.innerText || "");
+    ok("...and tapping it shows the RebateIQ teaser", /grant, tax credit and utility rebate/i.test(teaser), teaser.slice(0, 60));
     await ctx2.close();
   }
 

@@ -17,6 +17,28 @@ async function relay(route) {
 }
 const PAID = { email: "t@t.com", name: "T", company: "Test HVAC", plan: "pro", created: Date.now() };
 
+// The results are a dashboard: each tool's card lives in a sheet its tile
+// opens, and stays open across the re-render its own buttons cause.
+async function openSheet(page, id) {
+  if (await page.$(`#ds-${id}.open`)) return;
+  await closeSheet(page);
+  await page.click(`[data-open="${id}"]`);
+  await page.waitForSelector(`#ds-${id}.open`, { timeout: 5000 });
+}
+async function closeSheet(page) {
+  const x = await page.$(".dsheet.open .dsheet-x");
+  if (!x) return;
+  await x.click();
+  await page.waitForSelector(".dsheet.open", { state: "detached", timeout: 5000 });
+}
+async function changeJob(page, id) {
+  await closeSheet(page);
+  await page.click("#jobChangeBtn");
+  await page.waitForSelector(".job-sheet", { timeout: 5000 });
+  await page.click(`.job-row[data-job="${id}"]`);
+  await page.waitForTimeout(1500);
+}
+
 async function runCalc(page) {
   await page.fill("#address", "2100 Westheimer Rd, Houston, TX");
   await page.waitForTimeout(1800);
@@ -116,19 +138,16 @@ async function runCalc(page) {
     await page.waitForTimeout(200);
     await runCalc(page);
     const ducted = await page.evaluate(() => ({
-      cool: document.querySelector(".load-card.cool .count")?.textContent,
-      banner: document.querySelector(".job-banner")?.innerText || ""
+      cool: document.querySelector("#kpi-cool .count")?.textContent,
+      banner: document.querySelector(".dh-job")?.innerText || ""
     }));
     ok("the chosen job is shown with the results", /96% gas furnace/i.test(ducted.banner), ducted.banner.split("\n").slice(0, 2).join(" "));
 
     // Switch to ductless: duct losses must come off the load.
-    await page.click("#jobChangeBtn");
-    await page.waitForSelector(".job-sheet", { timeout: 5000 });
-    await page.click('.job-row[data-job="minisplit-single"]');
-    await page.waitForTimeout(1200);
+    await changeJob(page, "minisplit-single");
     const ductless = await page.evaluate(() => ({
-      cool: document.querySelector(".load-card.cool .count")?.textContent,
-      banner: document.querySelector(".job-banner")?.innerText || ""
+      cool: document.querySelector("#kpi-cool .count")?.textContent,
+      banner: document.querySelector(".dh-job")?.innerText || ""
     }));
     const num = t => parseInt((t || "0").replace(/[^0-9]/g, ""), 10);
     ok("a ductless job recalculates immediately", num(ductless.cool) > 0 && num(ductless.cool) !== num(ducted.cool), `${ducted.cool} -> ${ductless.cool}`);
@@ -137,6 +156,9 @@ async function runCalc(page) {
 
     // The sizing table has four right answers; the job decides which is THE
     // answer, so the matching row must be marked rather than left to the rep.
+    const trio = await page.evaluate(() => document.querySelector("#tile-sizing .trio.on em")?.textContent || "");
+    ok("the System options tile lights the job's family without opening anything", /variable/i.test(trio), trio);
+    await openSheet(page, "sizing");
     const marked = await page.evaluate(() => {
       const row = document.querySelector(".final-rec-row.picked");
       return { text: row ? row.innerText.replace(/\n/g, " ") : "", count: document.querySelectorAll(".final-rec-row.picked").length };
@@ -148,6 +170,7 @@ async function runCalc(page) {
 
     // A mini-split is a heat pump, so the running-cost tiers must be labelled
     // on HSPF2, not on a furnace's AFUE.
+    await openSheet(page, "energy");
     await page.click("#energyRunBtn");
     await page.waitForTimeout(1500);
     const eff = await page.evaluate(() => Array.from(document.querySelectorAll("#energyResults .eq-row"))
@@ -155,6 +178,7 @@ async function runCalc(page) {
     ok("a heat-pump job is rated on SEER2 and HSPF2, not AFUE", /HSPF2/.test(eff) && !/AFUE/.test(eff), eff);
 
     // And the printed report has to carry the job, or the sizes travel alone.
+    await closeSheet(page);
     await page.click("#reportBtn");
     await page.waitForTimeout(900);
     const rpt = await page.evaluate(() => document.querySelector("#reportRoot")?.innerText || "");
@@ -171,13 +195,12 @@ async function runCalc(page) {
      * customer's unit in, have a background job land, and watch the entries
      * vanish. Changing the job type forces exactly that re-render.
      */
+    await openSheet(page, "energy");
     await page.selectOption("#eqExTons", "4");
     await page.fill("#eqExYear", "2008");
     await page.fill("#eqExSeer", "11");
-    await page.click("#jobChangeBtn");
-    await page.waitForSelector(".job-sheet", { timeout: 5000 });
-    await page.click('.job-row[data-job="hp-variable"]');
-    await page.waitForTimeout(1500);
+    await changeJob(page, "hp-variable");
+    await openSheet(page, "energy");
     const kept = await page.evaluate(() => ({
       tons: document.querySelector("#eqExTons")?.value,
       year: document.querySelector("#eqExYear")?.value,
@@ -189,22 +212,17 @@ async function runCalc(page) {
     // Same bug, worse consequence: a measured attic R-value typed but not yet
     // applied used to vanish, leaving a load computed from the code-era guess
     // on a page that looked finished.
-    await page.click("#adjustDetails summary");
-    await page.waitForTimeout(200);
+    await openSheet(page, "adjust");
     await page.fill("#inArea", "2750");
     await page.fill("#inAtticR", "19");
-    await page.click("#jobChangeBtn");
-    await page.waitForSelector(".job-sheet", { timeout: 5000 });
-    await page.click('.job-row[data-job="ac-furnace-96"]');
-    await page.waitForTimeout(1500);
+    await changeJob(page, "ac-furnace-96");
+    await openSheet(page, "adjust");
     const tuned = await page.evaluate(() => ({
-      open: !!document.querySelector("#adjustDetails")?.open,
       area: document.querySelector("#inArea")?.value,
       atticR: document.querySelector("#inAtticR")?.value
     }));
     ok("fine-tune values typed but not yet applied survive a re-render",
       tuned.area === "2750" && tuned.atticR === "19", JSON.stringify(tuned));
-    ok("...and the panel stays open rather than collapsing on them", tuned.open === true);
     await ctx.close();
   }
 
@@ -234,6 +252,7 @@ async function runCalc(page) {
     await page.click('.job-row[data-job="duct-seal"]');
     await page.waitForTimeout(400);
     await runCalc(page);
+    await openSheet(page, "rebates");
     await page.click("#rebateBtn");
     await page.waitForTimeout(2500);
 
@@ -250,20 +269,18 @@ async function runCalc(page) {
     ok("the results name the measure the programs were found for", /Programs for\s*Duct sealing/i.test(rbText), rbText.slice(0, 120));
     ok("...including the contractor's own note", /aeroseal the whole house/i.test(rbText));
 
-    await page.click("#jobChangeBtn");
-    await page.waitForSelector(".job-sheet", { timeout: 5000 });
-    await page.click('.job-row[data-job="hp-variable"]');
-    await page.waitForTimeout(1500);
+    await changeJob(page, "hp-variable");
+    const staleTile = await page.evaluate(() => document.querySelector("#tile-rebates")?.innerText || "");
+    ok("the RebateIQ tile says the job changed since the search", /Job changed/i.test(staleTile), staleTile.replace(/\n/g, " · "));
+    await openSheet(page, "rebates");
     const staleText = await page.evaluate(() => document.querySelector(".rb-job.stale")?.innerText || "");
     ok("changing the job warns that the programs on screen are the old job's",
       /Duct sealing/i.test(staleText) && /Search again/i.test(staleText), staleText);
 
     // A duct-only job installs nothing, so the efficiency tiers are a
     // yardstick and must not read as options being quoted.
-    await page.click("#jobChangeBtn");
-    await page.waitForSelector(".job-sheet", { timeout: 5000 });
-    await page.click('.job-row[data-job="duct-replace"]');
-    await page.waitForTimeout(1500);
+    await changeJob(page, "duct-replace");
+    await openSheet(page, "energy");
     await page.click("#energyRunBtn");
     await page.waitForTimeout(1500);
     ok("a job that installs no equipment says the tiers are a yardstick",
@@ -297,11 +314,16 @@ async function runCalc(page) {
       return gone && hook;
     })());
 
-    ok("the running-cost and right-size analysis is kept", /running cost|right-size/i.test(body));
-    ok("it says pricing belongs in the quoting software", /quoting software/i.test(body));
+    // The engineering stays, one tap away; the money does not.
+    await openSheet(page, "energy");
+    const energyText = await page.evaluate(() => document.querySelector("#energyCard")?.innerText || "");
+    ok("the running-cost and right-size analysis is kept", /running cost|right-size/i.test(energyText));
+    await openSheet(page, "send");
+    const sendText = await page.evaluate(() => document.querySelector("#ds-send")?.innerText || "");
+    ok("it says pricing belongs in the quoting software", /quoting software/i.test(sendText));
 
     // Export
-    ok("an export card is offered", await page.$("#exportCard") !== null);
+    ok("an export card is offered", await page.$("#ds-send.open #exportCard") !== null);
     ok("there is a ServiceTitan paste button", await page.$("#exCopyText") !== null);
     ok("there is a JSON copy and a download", await page.$("#exCopyJson") !== null && await page.$("#exDownload") !== null);
     await page.click("#exCopyText");
@@ -316,6 +338,7 @@ async function runCalc(page) {
     // why no native integration is offered. What must not exist anywhere is a
     // FIELD that asks for one, which is the tunneling pattern ServiceTitan
     // prohibits. So check the inputs, not the words.
+    await closeSheet(page);
     await page.click("#openSettings");           // Settings is where such a field would plausibly live
     await page.waitForSelector("#aiProvider", { timeout: 5000 });
     const credFields = await page.evaluate(() => {
@@ -329,7 +352,7 @@ async function runCalc(page) {
     await page.click("#closeSettings");
     ok("no field anywhere asks for a ServiceTitan credential", credFields.length === 0, credFields.join(", "));
     ok("the reason is explained rather than silently omitted",
-      /prohibited/i.test(body) && /App Key/i.test(await page.evaluate(() => document.querySelector("#exportCard")?.innerText || "")));
+      /prohibited/i.test(sendText) && /App Key/i.test(sendText));
     ok("no runtime errors", errs.length === 0, errs.slice(0, 3).join(" | ") || "clean");
     await ctx.close();
   }
