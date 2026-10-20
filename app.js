@@ -476,8 +476,14 @@
       var oldBody = document.querySelector("#ds-" + keepSheet + " .dsheet-body");
       if (oldBody) keepScroll = oldBody.scrollTop;
     }
-
+    // Same for focus: the rep's cursor, mid-word, in the field they were
+    // typing in — or the button they just pressed, for keyboard users.
     var el = $("#results");
+    var act = document.activeElement;
+    var focusId = act && act.id && el.contains(act) ? act.id : null;
+    var selStart = null, selEnd = null;
+    try { if (focusId && typeof act.selectionStart === "number") { selStart = act.selectionStart; selEnd = act.selectionEnd; } } catch (e) {}
+
     el.innerHTML = html;
     el.classList.remove("hidden");
     $("#introNote").classList.add("hidden");
@@ -485,6 +491,7 @@
     document.body.classList.add("has-results");
 
     if (fresh) animateCounts();
+    syncBars(el);
     wireAdjust();
     restoreInputDraft();
     $("#reportBtn").addEventListener("click", function () { thinkThen("Building your report…", function () { generateReport({}); }); });
@@ -506,6 +513,13 @@
     } else if (keepSheet) {
       closeSheet();
     }
+    var refocus = focusId && !fresh && $("#" + focusId);
+    if (refocus) {
+      try {
+        refocus.focus({ preventScroll: true });
+        if (selStart != null) refocus.setSelectionRange(selStart, selEnd);
+      } catch (e) {}
+    }
 
     saveActiveToHistory();
     // Only a new calculation moves the page. Re-renders from a sheet, a job
@@ -525,7 +539,6 @@
   // existing wire*() function and the saved-input paths work untouched.
 
   var openSheetId = null;     // which sheet is open; UI state only, never saved
-  var sheetInHistory = false; // whether that sheet has an entry on the history stack
   var freshRender = false;    // set by a new calculation: animate, scroll, close sheets
 
   var SHEET_TITLES = {
@@ -604,7 +617,7 @@
     '</button>';
   }
   function lockedTile(id, label, icon) {
-    return tile({ id: id, label: label, icon: icon, head: "Pro tool", sub: planTier() === 0 ? "Free in the trial" : "Upgrade to unlock", locked: true });
+    return tile({ id: id, label: label, icon: icon, head: "Pro tool", sub: currentUser() ? "Upgrade to unlock" : "Free in the trial", locked: true });
   }
 
   function envelopeTile(r, e) {
@@ -622,10 +635,11 @@
 
   function breakdownTile(r) {
     var cb = r.cooling.breakdown;
-    var parts = [["Walls &amp; roof", cb.conduction], ["Sun on glass", cb.solar], ["People", cb.people], ["Appliances", cb.internal], ["Air leaks", cb.infiltration]];
+    // Same words as the bars in its sheet, so the tile and the detail agree.
+    var parts = [["walls, roof &amp; windows", cb.conduction], ["solar through glass", cb.solar], ["people", cb.people], ["appliances &amp; lighting", cb.internal], ["air leakage", cb.infiltration]];
     var sum = parts.reduce(function (a, x) { return a + x[1]; }, 0) || 1;
     var top = parts.reduce(function (a, x) { return x[1] > a[1] ? x : a; });
-    return tile({ id: "breakdown", label: "Load breakdown", icon: barsIcon(), head: top[0] + " " + Math.round(top[1] / sum * 100) + "%", sub: "Biggest share of cooling" });
+    return tile({ id: "breakdown", label: "Load breakdown", icon: barsIcon(), head: Math.round(top[1] / sum * 100) + "%", sub: "of the cooling load is " + top[0] });
   }
 
   function roomsTile() {
@@ -679,6 +693,7 @@
     if (planTier() < 2) return lockedTile("rebates", "RebateIQ", rebateIcon());
     var rb = state.rebates;
     if (state.rebateBusy) return tile({ id: "rebates", label: "RebateIQ", icon: rebateIcon(), head: "Searching…", sub: "20–60 seconds" });
+    if (state.rebateError) return tile({ id: "rebates", label: "RebateIQ", icon: rebateIcon(), head: "Search failed", sub: rb ? "Earlier results kept · open to retry" : "Open to try again", tone: "warn" });
     if (rb) {
       var n = rb.programs.length;
       var stale = rb.jobId && rb.jobId !== jobTypeId();
@@ -691,7 +706,6 @@
         tone: stale ? "warn" : n ? "good" : ""
       });
     }
-    if (state.rebateError) return tile({ id: "rebates", label: "RebateIQ", icon: rebateIcon(), head: "Search failed", sub: "Tap to try again", tone: "warn" });
     return tile({ id: "rebates", label: "RebateIQ", icon: rebateIcon(), head: "Find rebates", sub: "Live search, this address" });
   }
 
@@ -703,6 +717,7 @@
     var job = jobType();
     function row(re) { return rows.filter(function (x) { return re.test(x.k); })[0]; }
     function bare(v) { return String(v || "").replace(/\s*(federal\s+)?minimum$/i, ""); }
+    if (!code) return tile({ id: "permit", label: "PermitIQ", icon: shieldIcon(), head: "State unknown", sub: "Confirm the DOE region", tone: "warn" });
     var head, sub;
     if (job && job.cooling === false && job.heating !== false && job.fuel === "gas") {
       head = bare((row(/furnace/i) || {}).v); sub = "Furnace minimum";
@@ -711,9 +726,9 @@
       head = hp[1] || hp[0]; sub = (hp[1] ? hp[0] + " · " : "") + "heat pump min.";
     } else {
       head = bare(((r.recommendedTons * 12000 >= 45000 ? row(/≥\s*45/) : row(/<\s*45/)) || {}).v);
-      sub = "A/C minimum" + (code ? " · " + code : "");
+      sub = "A/C minimum · " + code;
     }
-    return tile({ id: "permit", label: "PermitIQ", icon: shieldIcon(), head: head || "Requirements", sub: code ? sub : "State not confirmed", tone: code ? "" : "warn" });
+    return tile({ id: "permit", label: "PermitIQ", icon: shieldIcon(), head: head || "Requirements", sub: sub });
   }
 
   // The three stage families side by side, with the one this job belongs to
@@ -759,42 +774,68 @@
     var el = $("#ds-" + id);
     if (!el) return;
     var still = !!(opts && opts.still);
+    var switching = !!openSheetId && openSheetId !== id;
     document.querySelectorAll(".dsheet.open").forEach(function (s) { if (s !== el) s.classList.remove("open", "still"); });
     el.classList.toggle("still", still);   // re-opened after a re-render: no slide-in
     el.classList.add("open");
     openSheetId = id;
+    // Locking the page hides its scrollbar on desktop. Pad by the scrollbar's
+    // width so the dashboard does not jump sideways while the sheet is open.
+    if (!document.body.classList.contains("ds-open")) {
+      var bar = window.innerWidth - document.documentElement.clientWidth;
+      document.body.style.paddingRight = bar > 0 ? bar + "px" : "";
+    }
     document.body.classList.add("ds-open");
+    setBackgroundInert(true);
     if (still) return;
-    // Phones close sheets with the Back button. Without a history entry for
-    // the sheet, Back would leave the app and throw the calculation away.
-    try {
-      if (sheetInHistory) history.replaceState({ lmpSheet: id }, "");
-      else { history.pushState({ lmpSheet: id }, ""); sheetInHistory = true; }
-    } catch (e) {}
+    // One history entry for "a sheet is open", whichever sheet it is.
+    if (!switching && layers.indexOf("sheet") === -1) pushLayer("sheet");
     animateBarsIn(el);
     var x = el.querySelector(".dsheet-x");
     if (x) try { x.focus({ preventScroll: true }); } catch (e) {}
   }
 
-  function closeSheet(fromHistory) {
-    if (openSheetId) {
-      var el = $("#ds-" + openSheetId);
-      if (el) el.classList.remove("open", "still");
-      var tileBtn = document.querySelector('[data-open="' + openSheetId + '"]');
-      openSheetId = null;
-      document.body.classList.remove("ds-open");
-      if (tileBtn) try { tileBtn.focus({ preventScroll: true }); } catch (e) {}
-    }
-    if (sheetInHistory && !fromHistory) {
-      sheetInHistory = false;
-      try { history.back(); } catch (e) {}
-    } else if (fromHistory) {
-      sheetInHistory = false;
-    }
+  // Hides the open sheet. History is the caller's business: closeSheet() for
+  // a close the rep asked for, the popstate handler for Back.
+  function hideSheet() {
+    if (!openSheetId) return;
+    var el = $("#ds-" + openSheetId);
+    if (el) el.classList.remove("open", "still");
+    openSheetId = null;
+    document.body.classList.remove("ds-open");
+    document.body.style.paddingRight = "";
+    setBackgroundInert(false);
+    // Back to the control that opened it, not merely the first one that could have.
+    var back = lastOpenerId && $("#" + lastOpenerId);
+    if (back) try { back.focus({ preventScroll: true }); } catch (e) {}
+  }
+  function closeSheet() {
+    hideSheet();
+    dropLayer("sheet");
   }
 
-  // Bars inside a sheet were sized while it was hidden; replay the fill so
-  // opening the sheet shows them grow, as they did on the old long page.
+  // While a sheet is open the page behind it is inert: Tab cannot wander off
+  // behind the sheet, and nothing behind it can be clicked or focused.
+  function setBackgroundInert(on) {
+    var behind = Array.prototype.slice.call(document.querySelectorAll(".app > :not(#results)"))
+      .concat(Array.prototype.slice.call(document.querySelectorAll("#results > :not(.dsheet)")));
+    behind.forEach(function (el) { if (on) el.setAttribute("inert", ""); else el.removeAttribute("inert"); });
+  }
+
+  // Sizes every bar from its data-w at once. A re-render rebuilds the bars
+  // with no width set; without this they drew empty (RoomIQ) or full (load
+  // breakdown) until their sheet was reopened.
+  function syncBars(root) {
+    root.querySelectorAll(".bar-fill, .rq-bar-fill").forEach(function (b) {
+      b.style.transition = "none";
+      b.style.width = (b.getAttribute("data-w") || 0) + "%";
+    });
+    requestAnimationFrame(function () {
+      root.querySelectorAll(".bar-fill, .rq-bar-fill").forEach(function (b) { b.style.transition = ""; });
+    });
+  }
+
+  // Replays the bar fill when a sheet slides in, so opening one shows its bars grow.
   function animateBarsIn(root) {
     var bars = root.querySelectorAll(".bar-fill, .rq-bar-fill");
     if (!bars.length) return;
@@ -806,32 +847,110 @@
     });
   }
 
+  // ---------- Layers: Back and Escape close whatever is on top ----------
+  //
+  // Three kinds of layer can stack over the dashboard: a tool sheet, the
+  // printed report, and Settings or the job picker. Each pushes one history
+  // entry, so the phone's Back button closes the top layer — as every app
+  // does — instead of leaving the page and losing the calculation. Escape
+  // does exactly what Back does.
+  //
+  // The report and Settings are watched rather than rewired, so whatever
+  // opens or closes them — a button, a save, an error path — is seen.
+  var layers = [];   // bottom to top, one per history entry we pushed
+
+  function pushLayer(kind) {
+    layers.push(kind);
+    try { history.pushState({ lmpDepth: layers.length }, ""); } catch (e) {}
+  }
+  // A layer closed itself (✕, Save, backdrop): forget it and pop its entry.
+  function dropLayer(kind) {
+    var i = layers.lastIndexOf(kind);
+    if (i === -1) return;
+    var wasTop = i === layers.length - 1;
+    layers.splice(i, 1);
+    // A layer closed from underneath another leaves its entry behind; the
+    // depth check in the popstate handler absorbs it on the next Back.
+    if (wasTop) try { history.back(); } catch (e) {}
+  }
+  function closeLayer(kind) {
+    if (kind === "sheet") hideSheet();
+    else if (kind === "report") closeReport();
+    else if (kind === "overlay") {
+      // Use the overlay's own close so its close logic runs (the job picker
+      // saves the rep's note there).
+      var c = $("#closeSettings") || $("#jobSheetClose") || $("#settingsRoot .close");
+      if (c) c.click(); else $("#settingsRoot").innerHTML = "";
+    }
+  }
+  function watchLayer(el, kind) {
+    if (!el || !window.MutationObserver) return;
+    var wasOpen = !!el.firstElementChild;
+    new MutationObserver(function () {
+      var open = !!el.firstElementChild;
+      if (open === wasOpen) return;      // content swapped, e.g. Settings → job picker
+      wasOpen = open;
+      if (open) pushLayer(kind);
+      else dropLayer(kind);              // a no-op when Back already popped it
+    }).observe(el, { childList: true });
+  }
+
   // Wired once: #results survives every re-render of its contents, so the
   // delegated listeners never need re-attaching.
+  var lastOpenerId = null;
+  var lastOpenTap = { t: 0, x: -1e4, y: -1e4 };
+  var pressTarget = null;
   function wireDashboard() {
     var root = $("#results");
     if (!root) return;
+    try { history.scrollRestoration = "manual"; } catch (e) {}
+
+    // The second tap of a double-tap lands on whatever the sheet that the
+    // first tap opened now shows in that spot — a Share button, Recalculate,
+    // the backdrop. Swallow a press inside a fresh sheet at the spot that
+    // opened it.
+    function ghost(ev) {
+      if (!openSheetId || !ev.target.closest || !ev.target.closest(".dsheet")) return false;
+      return Date.now() - lastOpenTap.t < 650 &&
+        Math.abs(ev.clientX - lastOpenTap.x) < 32 && Math.abs(ev.clientY - lastOpenTap.y) < 32;
+    }
+    ["mousedown", "click"].forEach(function (type) {
+      root.addEventListener(type, function (ev) {
+        if (ghost(ev)) { ev.preventDefault(); ev.stopPropagation(); }
+      }, true);
+    });
+    // Only a press that starts AND ends on the backdrop closes the sheet; a
+    // text selection dragged out of the drawer must not.
+    root.addEventListener("pointerdown", function (ev) { pressTarget = ev.target; }, true);
+
     root.addEventListener("click", function (ev) {
       var t = ev.target;
       if (!t || !t.closest) return;
       if (t.closest("[data-close]")) { closeSheet(); return; }
       var opener = t.closest("[data-open]");
-      if (opener && root.contains(opener)) { openSheet(opener.getAttribute("data-open")); return; }
-      // A tap on the dimmed backdrop, outside the panel, closes the sheet.
-      if (t.classList && t.classList.contains("dsheet")) closeSheet();
+      if (opener && root.contains(opener)) {
+        lastOpenerId = opener.id || null;
+        lastOpenTap = { t: Date.now(), x: ev.clientX, y: ev.clientY };
+        openSheet(opener.getAttribute("data-open"));
+        return;
+      }
+      if (t.classList && t.classList.contains("dsheet") && pressTarget === t) closeSheet();
     });
+
     document.addEventListener("keydown", function (ev) {
-      // The job picker and Settings sit above a sheet; let them have Escape.
-      if (ev.key === "Escape" && openSheetId && !$("#settingsRoot").innerHTML) closeSheet();
+      if (ev.key === "Escape" && layers.length) { ev.preventDefault(); try { history.back(); } catch (e) {} }
     });
     window.addEventListener("popstate", function (ev) {
-      var want = ev.state && ev.state.lmpSheet;
-      if (!want && openSheetId) closeSheet(true);
-      else if (!want) sheetInHistory = false;
+      var depth = (ev.state && ev.state.lmpDepth) || 0;
+      while (layers.length > depth) closeLayer(layers.pop());   // pop first: the observers then see it gone
+      // Landed on an entry deeper than what is open (Forward, or one left by a
+      // reload): relabel it so the next push and pop stay in step.
+      if (depth > layers.length) try { history.replaceState({ lmpDepth: layers.length }, ""); } catch (e) {}
     });
-    // A reload keeps history.state. There are no results after a reload, so a
-    // leftover sheet entry would only cost the rep an extra Back press.
-    try { if (history.state && history.state.lmpSheet) history.replaceState(null, ""); } catch (e) {}
+    watchLayer($("#reportRoot"), "report");
+    watchLayer($("#settingsRoot"), "overlay");
+    // A reload keeps history.state, and there is nothing open after a reload.
+    try { if (history.state && history.state.lmpDepth) history.replaceState(null, ""); } catch (e) {}
   }
 
   // ---------- Sheet bodies built here (the rest are the existing cards) ----------
@@ -1390,7 +1509,7 @@
     var anyAssumed = ["atticR", "windowU", "windowSHGC", "ach"].some(function (k) { return env.source[k] !== "entered"; });
     return '' +
       '<div class="env-card">' +
-        '<div class="env-head"><span class="ico">' + envelopeIcon() + '</span>EnvelopeIQ<span class="env-basis">' + head + '</span></div>' +
+        '<div class="env-head"><span class="ico">' + envelopeIcon() + '</span><span class="env-name">EnvelopeIQ</span><span class="env-basis">' + head + '</span></div>' +
         '<p class="env-sub">' + sub + '</p>' +
         '<div class="env-grid">' +
           row("Attic insulation", "R-" + env.atticR, env.source.atticR) +
@@ -1774,9 +1893,6 @@
       }
       requestAnimationFrame(step);
     });
-    requestAnimationFrame(function () {
-      document.querySelectorAll(".bar-fill, .rq-bar-fill").forEach(function (el) { el.style.width = (el.getAttribute("data-w") || 0) + "%"; });
-    });
   }
 
   // ---------- RebateIQ (Pro/Fleet + trial): live incentive research ----------
@@ -1948,6 +2064,7 @@
 
     return '' +
       '<div class="permit-card rb-card" id="rebateCard">' + head +
+        (state.rebateError ? '<p class="rb-error">The last search failed: ' + escapeHtml(state.rebateError) + ' These are the earlier results.</p>' : "") +
         (rb.programs.length
           ? '<div class="rb-total">' +
               '<div class="rb-total-num">' + money(t.capped) + '</div>' +
@@ -2869,10 +2986,11 @@
   function renderHistory() {
     var host = $("#history");
     if (!host) return;
-    var list = loadHistory();
     var onHome = $("#results").classList.contains("hidden");
-    if (!list.length || !onHome) { host.innerHTML = ""; return; }
-    var rows = list.slice(0, 8).map(function (j) {
+    // Below the dashboard the list leaves out the job already on screen.
+    var list = loadHistory().filter(function (j) { return onHome || j.id !== activeHistoryId; });
+    if (!list.length) { host.innerHTML = ""; return; }
+    var rows = list.slice(0, onHome ? 8 : 5).map(function (j) {
       return '<button class="hist-item" data-id="' + j.id + '">' +
           '<div class="hist-pin"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></div>' +
           '<div class="hist-main"><b>' + escapeHtml(j.address.split(",")[0]) + '</b>' +

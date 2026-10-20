@@ -127,7 +127,68 @@ const openSheets = page => page.$$eval(".dsheet.open", els => els.map(e => e.get
     await page.waitForSelector("#ds-breakdown.open");
     await page.click("#ds-breakdown .dsheet-x");
     await page.waitForTimeout(400);
-    ok("✕ closes the sheet and pops its history entry", (await openSheets(page)).length === 0 && !(await page.evaluate(() => history.state && history.state.lmpSheet)));
+    ok("✕ closes the sheet and pops its history entry", (await openSheets(page)).length === 0 && !(await page.evaluate(() => history.state && history.state.lmpDepth)));
+
+    // Focus goes back to the control that opened the sheet, and the page
+    // behind an open sheet is inert, so Tab cannot wander behind it.
+    await page.click("#tile-sizing");
+    await page.waitForSelector("#ds-sizing.open");
+    const inert = await page.evaluate(() => ({ top: document.querySelector(".topbar").inert, kpi: !!document.querySelector("#kpi-cool").closest("[inert]") }));
+    ok("the page behind an open sheet is inert", inert.top && inert.kpi);
+    for (let i = 0; i < 6; i++) await page.keyboard.press("Tab");
+    ok("Tab stays inside the sheet", await page.evaluate(() => !document.activeElement.closest("[inert]")), await page.evaluate(() => document.activeElement.id || document.activeElement.tagName));
+    await page.keyboard.press("Escape");
+    await page.waitForSelector(".dsheet.open", { state: "detached", timeout: 3000 });
+    ok("closing returns focus to the tile that opened it", await page.evaluate(() => document.activeElement.id) === "tile-sizing",
+      await page.evaluate(() => document.activeElement.id));
+    ok("...and the page behind is live again", !(await page.evaluate(() => !!document.querySelector("#results [inert], .topbar[inert]"))));
+
+    // Back and Escape close whatever is on top: the report over a sheet first.
+    await page.click("#tile-permit");
+    await page.waitForSelector("#ds-permit.open");
+    await page.waitForTimeout(700);
+    await page.click("#permitPkgBtn");
+    await page.waitForFunction(() => !!document.querySelector("#reportRoot").firstElementChild, null, { timeout: 8000 });
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(400);
+    ok("Escape over a report closes the report, not the sheet under it",
+      await page.evaluate(() => !document.querySelector("#reportRoot").firstElementChild && !!document.querySelector("#ds-permit.open")));
+    await page.click("#permitPkgBtn");
+    await page.waitForFunction(() => !!document.querySelector("#reportRoot").firstElementChild, null, { timeout: 8000 });
+    await page.goBack();
+    await page.waitForTimeout(400);
+    ok("Back over a report closes the report, not the sheet under it",
+      await page.evaluate(() => !document.querySelector("#reportRoot").firstElementChild && !!document.querySelector("#ds-permit.open")));
+    await page.goBack();
+    await page.waitForTimeout(400);
+    ok("...and the next Back closes the sheet, still in the app", (await openSheets(page)).length === 0 && !!(await page.$("#kpi-cool")));
+
+    // The report and the job picker straight from the dashboard close on Back too.
+    await page.click("#reportBtn");
+    await page.waitForFunction(() => !!document.querySelector("#reportRoot").firstElementChild, null, { timeout: 8000 });
+    await page.goBack();
+    await page.waitForTimeout(400);
+    ok("Back closes the report and keeps the calculation", await page.evaluate(() => !document.querySelector("#reportRoot").firstElementChild && !!document.querySelector("#kpi-cool")));
+    await page.click("#jobChangeBtn");
+    await page.waitForSelector(".job-sheet");
+    await page.goBack();
+    await page.waitForTimeout(400);
+    ok("Back closes the job picker and keeps the calculation", !(await page.$(".job-sheet")) && !!(await page.$("#kpi-cool")));
+
+    // RoomIQ bars draw right after Diagnose, with the sheet still open.
+    await page.click("#tile-rooms");
+    await page.waitForSelector("#ds-rooms.open");
+    await page.click("#rqAddBtn"); await page.waitForSelector("#rqName0");
+    await page.fill("#rqName0", "Master"); await page.fill("#rqArea0", "320"); await page.fill("#rqSup0", "1");
+    await page.click("#rqAddBtn"); await page.waitForSelector("#rqName1");
+    await page.fill("#rqArea1", "200");
+    await page.click("#rqRunBtn");
+    await page.waitForTimeout(1600);
+    const rqBars = await page.$$eval("#ds-rooms .rq-bar-fill", els => els.map(e => ({ w: +e.getAttribute("data-w"), px: e.getBoundingClientRect().width, track: e.parentElement.getBoundingClientRect().width })));
+    ok("RoomIQ bars draw right after Diagnose", rqBars.length === 2 && rqBars.every(b => Math.abs(b.px / b.track * 100 - b.w) < 3),
+      rqBars.map(b => `${b.w}% → ${Math.round(b.px / b.track * 100)}%`).join(", "));
+    await page.keyboard.press("Escape");
+    await page.waitForSelector(".dsheet.open", { state: "detached", timeout: 3000 });
 
     // Rapid open/close: tap-happy thumbs must not leave two sheets open or the page locked.
     for (const id of ["energy", "rooms", "permit", "sizing", "send", "rebates"]) {
@@ -164,6 +225,14 @@ const openSheets = page => page.$$eval(".dsheet.open", els => els.map(e => e.get
     await page.waitForTimeout(300);
     ok("an empty address explains itself and keeps the dashboard", /street address/i.test(await page.evaluate(() => document.querySelector("#errorBox").innerText)) && !!(await page.$("#kpi-cool")));
 
+    // The collapsed bar keeps Calculate beside the address while suggestions show.
+    const calcTop0 = await page.evaluate(() => document.querySelector("#calcBtn").getBoundingClientRect().top);
+    await page.fill("#address", "233 S Wacker Dr, Chicago, IL");
+    await page.waitForTimeout(1800);
+    const calcTop1 = await page.evaluate(() => ({ top: document.querySelector("#calcBtn").getBoundingClientRect().top, sug: document.querySelectorAll("#suggest > *").length }));
+    ok("Calculate stays beside the address while suggestions show", Math.abs(calcTop1.top - calcTop0) < 4, `${Math.round(calcTop0)} → ${Math.round(calcTop1.top)} with ${calcTop1.sug} suggestions`);
+    await page.keyboard.press("Escape");
+
     // Double-tapped Calculate from the collapsed bar: one calculation, no errors.
     await page.fill("#address", "233 S Wacker Dr, Chicago, IL");
     await page.click("#tile-energy");
@@ -182,7 +251,7 @@ const openSheets = page => page.$$eval(".dsheet.open", els => els.map(e => e.get
     await page.waitForSelector("#ds-sizing.open");
     await page.reload({ waitUntil: "load" });
     await page.waitForTimeout(500);
-    ok("refresh with a sheet open comes back clean", !(await page.evaluate(() => history.state && history.state.lmpSheet)) && !!(await page.$("#address")));
+    ok("refresh with a sheet open comes back clean", !(await page.evaluate(() => history.state && history.state.lmpDepth)) && !!(await page.$("#address")));
 
     ok("no runtime errors on the phone", page.errs.length === 0, page.errs.slice(0, 3).join(" | ") || "clean");
     await ctx.close();
@@ -225,7 +294,78 @@ const openSheets = page => page.$$eval(".dsheet.open", els => els.map(e => e.get
     ok("the RebateIQ tile updated behind the open sheet", landed, s.tile.replace(/\n/g, " · "));
     ok("the search landing does not close the sheet the rep is typing in", s.open);
     ok("...or wipe what they typed", s.attic === "19", s.attic);
+    ok("...or take the cursor out of the field", await page.evaluate(() => document.activeElement.id) === "inAtticR");
+    await page.keyboard.press("Escape");
+    await page.waitForSelector(".dsheet.open", { state: "detached", timeout: 3000 });
+
+    // Search again, and watch the load breakdown while it lands.
+    await page.click("#tile-rebates");
+    await page.waitForSelector("#ds-rebates.open");
+    await page.waitForTimeout(700);
+    await page.click("#rebateBtn");
+    await page.waitForTimeout(200);
+    await page.keyboard.press("Escape");
+    await page.waitForSelector(".dsheet.open", { state: "detached", timeout: 3000 });
+    await page.click("#tile-breakdown");
+    await page.waitForSelector("#ds-breakdown.open");
+    await page.waitForFunction(() => !/Searching/.test(document.querySelector("#tile-rebates")?.innerText || ""), null, { timeout: 20000 });
+    await page.waitForTimeout(400);
+    const bars = await page.$$eval("#ds-breakdown .bar-fill", els => els.map(e => ({ w: +e.getAttribute("data-w"), pct: e.getBoundingClientRect().width / e.parentElement.getBoundingClientRect().width * 100 })));
+    ok("load-breakdown bars stay true through a re-render", bars.length === 5 && bars.every(b => Math.abs(b.pct - b.w) < 3),
+      bars.map(b => `${b.w}→${Math.round(b.pct)}`).join(" "));
     ok("no runtime errors", page.errs.length === 0, page.errs.slice(0, 3).join(" | ") || "clean");
+    await ctx.close();
+  }
+
+  // ---------- 2b. Double taps ----------
+  console.log("\n=== Double taps ===");
+  for (const vp of [{ width: 820, height: 1180 }, { width: 390, height: 844 }]) {
+    const { ctx, page } = await newPage(b, { user: PRO, viewport: vp });
+    await page.goto(`${BASE}/app.html`, { waitUntil: "load" });
+    await runCalc(page);
+    // Record every action a stray second tap could set off: anything that
+    // raises the thinking overlay (Recalculate…) and the Share summary.
+    await page.evaluate(() => {
+      window.__thinks = [];
+      const show = window.Thinking.show;
+      window.Thinking.show = function (m) { window.__thinks.push(m); return show.apply(this, arguments); };
+      const note = what => () => { window.__thinks.push(what); return Promise.resolve(); };
+      Object.defineProperty(navigator, "share", { value: note("share"), configurable: true });
+      if (navigator.clipboard) Object.defineProperty(navigator.clipboard, "writeText", { value: note("copy"), configurable: true });
+    });
+    for (const sel of ["#adjustBtn", "#sendBtn", "#kpi-heat", "#kpi-bp"]) {
+      await page.evaluate(() => { window.__thinks = []; });
+      const box = await (await page.$(sel)).boundingBox();
+      const x = box.x + box.width / 2, y = box.y + box.height / 2;
+      await page.mouse.click(x, y);
+      await page.waitForTimeout(170);
+      await page.mouse.click(x, y);
+      await page.waitForTimeout(500);
+      const st = await page.evaluate(() => ({ open: document.querySelectorAll(".dsheet.open").length, thinks: window.__thinks.slice() }));
+      ok(`${vp.width}px: a double tap on ${sel} opens its sheet and does nothing else`, st.open === 1 && st.thinks.length === 0,
+        `${st.open} open, ${st.thinks.join("; ") || "no actions"}`);
+      await page.keyboard.press("Escape");
+      await page.waitForSelector(".dsheet.open", { state: "detached", timeout: 3000 });
+      await page.waitForTimeout(300);
+    }
+    ok(`${vp.width}px: no runtime errors`, page.errs.length === 0, page.errs.slice(0, 3).join(" | ") || "clean");
+    await ctx.close();
+  }
+
+  // ---------- 2c. The smallest phones ----------
+  console.log("\n=== 320 px ===");
+  {
+    const { ctx, page } = await newPage(b, { user: PRO, viewport: { width: 320, height: 568 } });
+    await page.goto(`${BASE}/app.html`, { waitUntil: "load" });
+    await runCalc(page);
+    const fit = await page.evaluate(() => ({
+      kpiTops: Array.from(document.querySelectorAll(".kpi-top")).filter(k => k.scrollWidth > k.clientWidth + 1).length,
+      trios: Array.from(document.querySelectorAll(".trio b")).filter(t => t.getBoundingClientRect().height > 26).length,
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
+    }));
+    ok("320px: every answer tile's heading fits", fit.kpiTops === 0, `${fit.kpiTops} clipped`);
+    ok("320px: tonnage figures never split across lines", fit.trios === 0);
+    ok("320px: no sideways scroll", fit.overflow <= 1, `${fit.overflow}px`);
     await ctx.close();
   }
 

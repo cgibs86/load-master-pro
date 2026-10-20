@@ -707,7 +707,7 @@ footer .disc { display: block; margin-top: 6px; }
 #results { scroll-margin-top: 92px; }
 
 .dash-head { margin: 16px 2px 14px; animation: rise 0.45s ease both; }
-.dh-addr { font-size: 17px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.3; }
+.dh-addr { font-size: 17px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.3; overflow-wrap: anywhere; }
 .dh-job { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin-top: 6px; font-size: 13px; color: var(--muted); }
 .dh-job b { color: var(--text); font-weight: 650; }
 .dh-job .job-change { margin-left: 2px; padding: 4px 10px; }
@@ -764,7 +764,7 @@ footer .disc { display: block; margin-top: 6px; }
 .tile-ico { width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center; flex: none; background: rgba(255, 255, 255, 0.06); color: #c3ccf0; }
 .tile-ico svg { width: 13px; height: 13px; }
 .tile-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tile-head { display: block; max-width: 100%; margin-top: 6px; font-size: 16px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.2; overflow-wrap: anywhere; }
+.tile-head { display: block; max-width: 100%; margin-top: 6px; font-size: 16px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.2; overflow-wrap: break-word; }
 .tile-sub { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; max-width: 100%; font-size: 11.5px; color: var(--muted); line-height: 1.35; }
 .tile.good { border-color: rgba(124, 224, 168, 0.32); }
 .tile.good .tile-head { color: #9ce6bf; }
@@ -777,7 +777,7 @@ footer .disc { display: block; margin-top: 6px; }
 .tile-pro { margin-left: auto; padding: 2px 6px; border-radius: 999px; font-size: 9.5px; font-weight: 800; letter-spacing: 0.06em; color: #ffd591; background: rgba(255, 193, 87, 0.14); border: 1px solid rgba(255, 193, 87, 0.3); }
 .tile-trio { display: flex; gap: 12px; }
 .trio { display: flex; flex-direction: column; }
-.trio b { font-size: 17px; font-variant-numeric: tabular-nums; }
+.trio b { font-size: 17px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .trio em { font-style: normal; font-size: 10px; font-weight: 600; letter-spacing: 0; color: var(--muted-2); }
 .trio.on b { color: var(--accent); }
 .trio.on em { color: #9ec4ff; }
@@ -800,6 +800,7 @@ footer .disc { display: block; margin-top: 6px; }
 body.has-results .app { padding-bottom: calc(92px + env(safe-area-inset-bottom)); }
 body.has-results #toast { bottom: calc(86px + env(safe-area-inset-bottom)); }
 body.ds-open .dash-bar { visibility: hidden; }
+body.has-results #history { margin-top: 26px; }
 
 /* After a calculation the search card shrinks to one line: a new address and
    Calculate. The job is changed from the dashboard. */
@@ -807,8 +808,10 @@ body.has-results .search-card { display: grid; grid-template-columns: 1fr auto; 
 body.has-results .search-card > .field-label,
 body.has-results .search-card > #jobPick,
 body.has-results #geoBtn { display: none; }
-body.has-results .search-card > #suggest,
-body.has-results .search-card > #errorBox { grid-column: 1 / -1; }
+body.has-results .search-card > .addr-input-wrap { grid-column: 1; grid-row: 1; }
+body.has-results .search-card > #calcBtn { grid-column: 2; grid-row: 1; }
+body.has-results .search-card > #suggest { grid-column: 1 / -1; grid-row: 2; }
+body.has-results .search-card > #errorBox { grid-column: 1 / -1; grid-row: 3; }
 body.has-results #calcBtn { width: auto; margin-top: 0; padding: 14px 16px; font-size: 14px; box-shadow: none; white-space: nowrap; }
 body.has-results .addr-input-wrap input { padding-top: 12px; padding-bottom: 12px; }
 
@@ -840,8 +843,9 @@ body.has-results .addr-input-wrap input { padding-top: 12px; padding-bottom: 12p
 .dsheet-title { font-size: 16px; letter-spacing: -0.01em; }
 .dsheet-x { margin-left: auto; width: 38px; height: 38px; flex: none; display: grid; place-items: center; border-radius: 12px; cursor: pointer; color: var(--muted); background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border); }
 .dsheet-body { overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 14px 18px calc(26px + env(safe-area-inset-bottom)); }
-.dsheet-body > :first-child { margin-top: 0; }
-body.ds-open { overflow: hidden; }
+/* No pull-to-refresh while a sheet is open: a downward swipe on a phone must
+   not reload the page and lose the calculation. */
+body.ds-open { overflow: hidden; overscroll-behavior-y: none; }
 
 /* Inside a sheet the sheet is the container, so each card drops its own box,
    and the cards whose title only repeats the sheet's drop that too. */
@@ -854,10 +858,14 @@ body.ds-open { overflow: hidden; }
 .dsheet-body > .ai-card { padding-top: 14px; border-top: 1px solid var(--border-soft); }
 .dsheet-body .details-body { padding: 0; }
 .dsheet-body > .hp-card, .dsheet-body > .env-card, .dsheet-body > .photos-card { margin-top: 14px; }
+/* After the rules above, so the first card in every sheet starts at the same height. */
+.dsheet-body > :first-child, .dsheet-body > #adjustDetails > :first-child { margin-top: 0; }
+.dsheet-body .env-head .ico, .dsheet-body .env-name { display: none; }
+.dsheet-body .env-basis { margin-left: 0; text-align: left; font-size: 12.5px; }
 .ds-sec { margin: 18px 2px 4px; font-size: 11px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted-2); }
 .ds-note { margin: 6px 2px 0; font-size: 12.5px; color: var(--muted); line-height: 1.55; }
 .share-row { margin-top: 14px; }
-.share-row .ex-btn { width: 100%; justify-content: center; }
+.share-row .ex-btn { width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; }
 
 /* "Why these sizes?": the reasoning, folded until someone asks */
 .why { margin-top: 16px; border-radius: 14px; border: 1px solid var(--border-soft); background: rgba(255, 255, 255, 0.03); }
@@ -870,10 +878,19 @@ body.ds-open { overflow: hidden; }
 
 @keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
 
+@media (prefers-reduced-motion: reduce) {
+  .dash-head, .kpi, .tile, .dsheet.open, .dsheet-panel { animation: none; }
+  .bar-fill, .rq-bar-fill { transition: none; }
+}
+
 /* Small phones (iPhone SE and the like): keep the answer figures inside their tiles */
 @media (max-width: 360px) {
   .kpi { padding: 12px 11px 11px; }
+  .kpi-top { font-size: 11.5px; gap: 6px; }
+  .kpi .tile-go { display: none; }
   .kpi-val { font-size: 23px; }
+  .tile-trio { gap: 7px; }
+  .trio b { font-size: 15px; }
   .kpi-val small { font-size: 11.5px; margin-left: 3px; }
   .tile { padding: 11px 11px 12px; }
   .tile-head { font-size: 15px; }
@@ -900,6 +917,7 @@ body.ds-open { overflow: hidden; }
   .db-btn { flex: none; padding: 12px 22px; }
   body.ds-open .dash-bar { visibility: visible; }
   body.has-results #toast { bottom: calc(26px + env(safe-area-inset-bottom)); }
+  body.ds-open #toast { left: calc(100% - 300px); }
   /* Light dim, no blur: the dashboard stays readable beside the drawer. */
   .dsheet { justify-content: flex-end; align-items: stretch; background: rgba(4, 7, 16, 0.38); -webkit-backdrop-filter: none; backdrop-filter: none; }
   .dsheet-panel { width: 600px; max-width: 600px; max-height: none; border: 1px solid var(--border); border-right: 0; border-radius: 24px 0 0 24px; animation-name: slideInRight; }

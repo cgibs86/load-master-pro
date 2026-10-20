@@ -123,16 +123,20 @@ width about nine screens tall, seventeen stacked sections, the recommendation
 five screens down and the tonnage stated five times. Now the address and job,
 four answer tiles (cooling tons, heating BTU/h, airflow, balance point) and
 eight tool tiles fit on about one and a half phone screens, and each tool's
-full card opens in a sheet: a bottom sheet on phones, a drawer beside the
-dashboard on desktop. Each tile carries one live headline — *4 of 4 assumed*,
+full card opens in a sheet: a bottom sheet on phones, a side drawer on
+desktop. Each tile carries one live headline — *4 of 4 assumed*,
 *$3,200 found*, *1 short of air*, *job changed — search again* — coloured by
 whether it needs attention, so the rep can see what is left to check without
 opening anything. Report, Send and Adjust stay pinned in reach. The cards
 themselves are unchanged and always in the DOM, just hidden, which is what
 keeps every handler and saved-input path working; a sheet that is open when
-the page re-renders stays open at the same scroll position. Sheets close with
-✕, the backdrop, Escape, or the phone's Back button (each sheet pushes a
-history entry, so Back never leaves the app and throws the calculation away).
+the page re-renders stays open at the same scroll position, with the cursor
+still in the field the rep was typing in. Back and Escape close whatever is on
+top — a sheet, the printed report over it, Settings or the job picker — because
+each pushes a history entry; Back never leaves the app and throws the
+calculation away. While a sheet is open the page behind it is inert, so Tab
+cannot wander behind it, and a quick double tap cannot fire the button the new
+sheet happens to show under the finger.
 The printed PDF is still the full report — that is its job.
 
 **Caching.** The service worker is network-first for code (documents, JS, CSS,

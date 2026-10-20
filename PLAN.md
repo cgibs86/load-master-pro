@@ -72,5 +72,17 @@ tap, final recommendation ~5 screens down, tonnage stated 5 times.
       search card collapses after a calculation; a second calculation from it works
 - [x] 6 — 1280 px: KPIs on one row, groups side by side, drawer at the right
 - [x] 7 — all 10 browser probes + 439 unit checks green; RoomIQ saves on edit
-- [ ] 8 — reviewer subagent pass (in progress)
-- [ ] 9 — commit, push, confirm deploy
+- [x] 8 — report-only reviewer pass across 320/390/820/1280 px. Confirmed and
+      fixed, each with a regression check in probe 12: bars empty or full after
+      a re-render; a double tap firing the control under the finger in the new
+      sheet; Escape/Back closing the sheet under the report or Settings (and Back
+      from the report or job picker leaving the app); focus escaping behind the
+      sheet and lost on re-render; a drag-select closing the drawer; the desktop
+      scrollbar jump; Calculate jumping below the suggestions; 320 px clipping
+      and a split "12.5"; the rebate tile hiding a failed re-search; the PermitIQ
+      tile headlining a guessed region; Recent jobs missing below the dashboard.
+      Not fixed: iOS scroll-lock and Android swipe behaviour could not be tested
+      here (pull-to-refresh is now blocked while a sheet is open); the older
+      locked-card buttons still say "Start free trial" to signed-in Free
+      accounts; a reload leaves one inert history entry behind.
+- [x] 9 — commit, push, confirm deploy
