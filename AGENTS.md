@@ -39,3 +39,5 @@ Shared by Codex and Claude Code. Every line here should change what you do.
 
 ## Lessons
 <!-- Newest on top. Delete what no longer applies. -->
+- When a session starts, run `git fetch` and work from the latest `origin/main` before touching anything: cloud sessions can open on an old branch
+
